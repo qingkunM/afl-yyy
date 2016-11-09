@@ -82,9 +82,9 @@ static void find_as(u8* argv0) {
     dir = ck_strdup(argv0);
     *slash = '/';
 
-    tmp = alloc_printf("%s/afl-as", dir);
+    tmp = alloc_printf("%s/afl-as", dir);//定位到afl-as程序
 
-    if (!access(tmp, X_OK)) {
+    if (!access(tmp, X_OK)) {//检查执行权限
       as_path = dir;
       ck_free(tmp);
       return;
@@ -170,7 +170,7 @@ static void edit_params(u32 argc, char** argv) {
       cc_params[0] = alt_cc ? alt_cc : (u8*)"gcj";
     } else {
       u8* alt_cc = getenv("AFL_CC");
-      cc_params[0] = alt_cc ? alt_cc : (u8*)"gcc";
+      cc_params[0] = alt_cc ? alt_cc : (u8*)"gcc"; //配置出gcc
     }
 
 #endif /* __APPLE__ */
@@ -207,7 +207,7 @@ static void edit_params(u32 argc, char** argv) {
   }
 
   cc_params[cc_par_cnt++] = "-B";
-  cc_params[cc_par_cnt++] = as_path;
+  cc_params[cc_par_cnt++] = as_path; //这个是有find_as函数决定的
 
   if (clang_mode)
     cc_params[cc_par_cnt++] = "-no-integrated-as";
@@ -266,6 +266,7 @@ static void edit_params(u32 argc, char** argv) {
   }
 
   cc_params[cc_par_cnt] = NULL;
+  //this is :gcc  /desktop/1.cpp -o aflout -B /afl-yyy -g -O3 -funroll-loops
 
 }
 
@@ -299,11 +300,11 @@ int main(int argc, char** argv) {
   }
 
 
-  find_as(argv[0]);
+  find_as(argv[0]); //argv[0]是afl-gcc
 
   edit_params(argc, argv);
 
-  execvp(cc_params[0], (char**)cc_params);
+  execvp(cc_params[0], (char**)cc_params);// cc_params[0] is gcc,利用gcc编译了目标程序
 
   FATAL("Oops, failed to execute '%s' - check your PATH", cc_params[0]);
 

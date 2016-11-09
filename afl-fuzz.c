@@ -304,12 +304,12 @@ enum {
 /* Execution status fault codes */
 
 enum {
-  /* 00 */ FAULT_NONE,
-  /* 01 */ FAULT_HANG,
-  /* 02 */ FAULT_CRASH,
-  /* 03 */ FAULT_ERROR,
-  /* 04 */ FAULT_NOINST,
-  /* 05 */ FAULT_NOBITS
+  /* 00 */ FAULT_NONE,		//testcase do not crash
+  /* 01 */ FAULT_HANG,		//testcase results in a hang
+  /* 02 */ FAULT_CRASH,		//testcase results in a crash
+  /* 03 */ FAULT_ERROR,		//unable to execute target application
+  /* 04 */ FAULT_NOINST,	//no instrumentation detected
+  /* 05 */ FAULT_NOBITS     //no new instrumentation output
 };
 
 
@@ -730,8 +730,8 @@ static void read_bitmap(u8* fname) {
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */
 
-#define FFL(_b) (0xffULL << ((_b) << 3))
-#define FF(_b)  (0xff << ((_b) << 3))
+#define FFL(_b) (0xffULL << ((_b) << 3))  //UUL is unsigned long long 64位
+#define FF(_b)  (0xff << ((_b) << 3)) //0xff*2^(_b*8)
 
 static inline u8 has_new_bits(u8* virgin_map) {
 
@@ -740,7 +740,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
   u64* current = (u64*)trace_bits;
   u64* virgin  = (u64*)virgin_map;
 
-  u32  i = (MAP_SIZE >> 3);
+  u32  i = (MAP_SIZE >> 3); // 8个字节,64位处理一次,一共处理 2^13=8192次
 
 #else
 
@@ -763,7 +763,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
 #else
 
     u32 cur = *current;
-    u32 vir = *virgin;
+    u32 vir = *virgin; //这个所有位全是1
 
 #endif /* ^__x86_64__ */
 
@@ -772,12 +772,12 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
     if (cur & vir) {
 
-      if (ret < 2) {
+      if (ret < 2) { //ret 初始为0
 
         /* This trace did not have any new bytes yet; see if there's any
            current[] byte that is non-zero when virgin[] is 0xff. */
 
-#ifdef __x86_64__
+#ifdef __x86_64__  //8个字节处理一次 为了提高效率
 
         if (((cur & FFL(0)) && (vir & FFL(0)) == FFL(0)) ||
             ((cur & FFL(1)) && (vir & FFL(1)) == FFL(1)) ||
@@ -786,8 +786,9 @@ static inline u8 has_new_bits(u8* virgin_map) {
             ((cur & FFL(4)) && (vir & FFL(4)) == FFL(4)) ||
             ((cur & FFL(5)) && (vir & FFL(5)) == FFL(5)) ||
             ((cur & FFL(6)) && (vir & FFL(6)) == FFL(6)) ||
-            ((cur & FFL(7)) && (vir & FFL(7)) == FFL(7))) ret = 2;
-        else ret = 1;
+            ((cur & FFL(7)) && (vir & FFL(7)) == FFL(7)))
+        	ret = 2; //只要trace_bits中有非0 ,就为2
+        else ret = 1; //貌似ret不可能=1
 
 #else
 
@@ -801,7 +802,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
       }
 
-      *virgin = vir & ~cur;
+      *virgin = vir & ~cur; //vir是64位,cur是64位,操作后virgin存在0
 
     }
 
@@ -810,7 +811,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
   }
 
-  if (ret && virgin_map == virgin_bits) bitmap_changed = 1;
+  if (ret && virgin_map == virgin_bits) bitmap_changed = 1; //只要有基本块运行到
 
   return ret;
 
@@ -853,10 +854,10 @@ static u32 count_bits(u8* mem) {
    mostly to update the status screen or calibrate and examine confirmed
    new paths. */
 
-static u32 count_bytes(u8* mem) {
+static u32 count_bytes(u8* mem) { //统计trace_bits 中非0的字节数,即命中的基本块数量
 
   u32* ptr = (u32*)mem;
-  u32  i   = (MAP_SIZE >> 2);
+  u32  i   = (MAP_SIZE >> 2);  //2^14个字节  4个字节处理一次
   u32  ret = 0;
 
   while (i--) {
@@ -864,14 +865,14 @@ static u32 count_bytes(u8* mem) {
     u32 v = *(ptr++);
 
     if (!v) continue;
-    if (v & FF(0)) ret++;
-    if (v & FF(1)) ret++;
-    if (v & FF(2)) ret++;
-    if (v & FF(3)) ret++;
+    if (v & FF(0)) ret++; //FF(0) is 0xff
+    if (v & FF(1)) ret++; //FF(1) is 0xff00
+    if (v & FF(2)) ret++; //FF(2) is 0xff0000
+    if (v & FF(3)) ret++; //FF(3) is 0xff000000
 
   }
 
-  return ret;
+  return ret; //返回运行基本块的数量? 数量怎么那么少?
 
 }
 
@@ -1014,7 +1015,7 @@ static inline void classify_counts(u64* mem) {
 
     if (*mem) {
 
-      u8* mem8 = (u8*)mem;
+      u8* mem8 = (u8*)mem;  //这里用到了滚筒策略
 
       mem8[0] = count_class_lookup[mem8[0]];
       mem8[1] = count_class_lookup[mem8[1]];
@@ -1096,7 +1097,7 @@ static void minimize_bits(u8* dst, u8* src) {
    seen in the bitmap so far, and focus on fuzzing them at the expense of
    the rest.
 
-   The first step of the process is to maintain a list of top_rated[] entries
+   The first step of the process is to maintain a list of top_rated[](这个数组) entries
    for every byte in the bitmap. We win that slot if there is no previous
    contender, or if the contender has a more favorable speed x size factor. */
 
@@ -1110,13 +1111,13 @@ static void update_bitmap_score(struct queue_entry* q) {
 
   for (i = 0; i < MAP_SIZE; i++)
 
-    if (trace_bits[i]) {
+    if (trace_bits[i]) { //每个测试用例运行到该基本块时,比较一个数值,将值最小的testcase记录到top_rated数组中
 
        if (top_rated[i]) {
 
          /* Faster-executing or smaller test cases are favored. */
 
-         if (fav_factor > top_rated[i]->exec_us * top_rated[i]->len) continue;
+         if (fav_factor > top_rated[i]->exec_us * top_rated[i]->len) continue; //运行时间*测试用例长度
 
          /* Looks like we're going to win. Decrease ref count for the
             previous winner, discard its trace_bits[] if necessary. */
@@ -1146,8 +1147,8 @@ static void update_bitmap_score(struct queue_entry* q) {
 
 
 /* The second part of the mechanism discussed above is a routine that
-   goes over top_rated[] entries, and then sequentially grabs winners for
-   previously-unseen bytes (temp_v) and marks them as favored, at least
+   goes over(检查) top_rated[] entries, and then sequentially(继续) grabs winners for
+   previously-unseen bytes (temp_v) and marks them as favored(设置favored变量), at least
    until the next run. The favored entries are given more air time during
    all fuzzing steps. */
 
@@ -1168,7 +1169,7 @@ static void cull_queue(void) {
 
   q = queue;
 
-  while (q) {
+  while (q) { //约简queue
     q->favored = 0;
     q = q->next;
   }
@@ -1212,23 +1213,23 @@ static void setup_shm(void) {
 
   if (!in_bitmap) memset(virgin_bits, 255, MAP_SIZE);
 
-  memset(virgin_hang, 255, MAP_SIZE);
+  memset(virgin_hang, 255, MAP_SIZE);//所有都赋值1
   memset(virgin_crash, 255, MAP_SIZE);
 
-  shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);//IPC_PRIVATE也是一种方法,便于父子进程通信
 
   if (shm_id < 0) PFATAL("shmget() failed");
 
-  atexit(remove_shm);
+  atexit(remove_shm);//atexit注册终止函数,remove_shm是函数名,ok
 
-  shm_str = alloc_printf("%d", shm_id);
+  shm_str = alloc_printf("%d", shm_id);//shm_id转化成字符串
 
   /* If somebody is asking us to fuzz instrumented binaries in dumb mode,
      we don't want them to detect instrumentation, since we won't be sending
      fork server commands. This should be replaced with better auto-detection
      later on, perhaps? */
 
-  if (!dumb_mode) setenv(SHM_ENV_VAR, shm_str, 1);
+  if (!dumb_mode) setenv(SHM_ENV_VAR, shm_str, 1); //在插桩模式下增加环境变量
 
   ck_free(shm_str);
 
@@ -1271,7 +1272,7 @@ static void setup_post(void) {
 
 static void read_testcases(void) {
 
-  struct dirent **nl;
+  struct dirent **nl; //namelist
   s32 nl_cnt;
   u32 i;
   u8* fn;
@@ -1279,7 +1280,8 @@ static void read_testcases(void) {
   /* Auto-detect non-in-place resumption attempts. */
 
   fn = alloc_printf("%s/queue", in_dir);
-  if (!access(fn, F_OK)) in_dir = fn; else ck_free(fn);
+  if (!access(fn, F_OK)) in_dir = fn; //F_OK判断是否存在
+  else ck_free(fn);
 
   ACTF("Scanning '%s'...", in_dir);
 
@@ -1287,8 +1289,8 @@ static void read_testcases(void) {
      the ordering  of test cases would vary somewhat randomly and would be
      difficult to control. */
 
-  nl_cnt = scandir(in_dir, &nl, NULL, alphasort);
-
+  nl_cnt = scandir(in_dir, &nl, NULL, alphasort);//扫描in_dir下满足过滤条件的,alphasort是一种排序函数
+  //这里还包括 . 和.. 两个目录
   if (nl_cnt < 0) {
 
     if (errno == ENOENT || errno == ENOTDIR)
@@ -1763,7 +1765,7 @@ static void save_auto(void) {
 }
 
 
-/* Load automatically generated extras. */
+/* Load automatically generated extras. */   //extra是用于固定格式的
 
 static void load_auto(void) {
 
@@ -2349,11 +2351,11 @@ static void init_forkserver(char** argv) {
 
   if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
 
-  forksrv_pid = fork();
+  forksrv_pid = fork();//
 
   if (forksrv_pid < 0) PFATAL("fork() failed");
 
-  if (!forksrv_pid) {
+  if (!forksrv_pid) { //child
 
     struct rlimit r;
 
@@ -2445,24 +2447,24 @@ static void init_forkserver(char** argv) {
 
     setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                            "msan_track_origins=0", 0);
-
-    execv(target_path, argv);
+    //argv是执行的参数
+    execv(target_path, argv);//子进程启动qemu.execv会继承打开的文件描述符
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
        falling through. */
 
-    *(u32*)trace_bits = EXEC_FAIL_SIG;
+    *(u32*)trace_bits = EXEC_FAIL_SIG; //结束信号??
     exit(0);
 
   }
 
   /* Close the unneeded endpoints. */
-
+  //parent process
   close(ctl_pipe[0]);
   close(st_pipe[1]);
 
-  fsrv_ctl_fd = ctl_pipe[1];
-  fsrv_st_fd  = st_pipe[0];
+  fsrv_ctl_fd = ctl_pipe[1]; //写管道
+  fsrv_st_fd  = st_pipe[0];  //读管道
 
   /* Wait for the fork server to come up, but don't wait too long. */
 
@@ -2471,7 +2473,7 @@ static void init_forkserver(char** argv) {
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  rlen = read(fsrv_st_fd, &status, 4);
+  rlen = read(fsrv_st_fd, &status, 4);//从fsrv_st_fd管道读取4个字节的内容
 
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
@@ -2489,7 +2491,7 @@ static void init_forkserver(char** argv) {
   if (child_timed_out)
     FATAL("Timeout while initializing fork server (adjusting -t may help)");
 
-  if (waitpid(forksrv_pid, &status, 0) <= 0)
+  if (waitpid(forksrv_pid, &status, 0) <= 0) //等待子进程结束
     PFATAL("waitpid() failed");
 
   if (WIFSIGNALED(status)) {
@@ -2619,7 +2621,7 @@ static void init_forkserver(char** argv) {
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(char** argv) {
+static u8 run_target(char** argv) { //运行的内容从哪来
 
   static struct itimerval it;
   static u32 prev_timed_out = 0;
@@ -2650,11 +2652,11 @@ static u8 run_target(char** argv) {
 
   if (dumb_mode == 1 || no_forkserver) {
 
-    child_pid = fork();
+    child_pid = fork(); //自己fork,不利用qemu
 
     if (child_pid < 0) PFATAL("fork() failed");
 
-    if (!child_pid) {
+    if (!child_pid) { //子进程
 
       struct rlimit r;
 
@@ -2723,21 +2725,21 @@ static u8 run_target(char** argv) {
 
     }
 
-  } else {
+  } else { //可以fork,或者有forkserver,默认是可以的
 
     s32 res;
 
     /* In non-dumb mode, we have the fork server up and running, so simply
        tell it to have at it, and then read back PID. */
 
-    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
+    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) { //告诉 qemu 可以开始测试
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to request new process from fork server (OOM?)");
 
     }
 
-    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) { //控制管道  读取的测试进程的pid
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to request new process from fork server (OOM?)");
@@ -2789,7 +2791,7 @@ static u8 run_target(char** argv) {
 
     s32 res;
 
-    if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+    if ((res = read(fsrv_st_fd, &status, 4)) != 4) { //从qemu中读取状态信息
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to communicate with fork server");
@@ -2804,7 +2806,7 @@ static u8 run_target(char** argv) {
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  total_execs++;
+  total_execs++; //execve函数的调用次数 ,这个也是记录的测试用例的次数
 
   /* Any subsequent operations on trace_bits must not be moved by the
      compiler below this point. Past this location, trace_bits[] behave
@@ -2815,7 +2817,7 @@ static u8 run_target(char** argv) {
   tb4 = *(u32*)trace_bits;
 
 #ifdef __x86_64__
-  classify_counts((u64*)trace_bits);
+  classify_counts((u64*)trace_bits); //对tracer_bit进行记录操作
 #else
   classify_counts((u32*)trace_bits);
 #endif /* ^__x86_64__ */
@@ -2824,9 +2826,9 @@ static u8 run_target(char** argv) {
 
   /* Report outcome to caller. */
 
-  if (child_timed_out) return FAULT_HANG;
+  if (child_timed_out) return FAULT_HANG; //时间太长,挂起
 
-  if (WIFSIGNALED(status) && !stop_soon) {
+  if (WIFSIGNALED(status) && !stop_soon) { //判断测试进程是否异常退出
     kill_signal = WTERMSIG(status);
     return FAULT_CRASH;
   }
@@ -2851,7 +2853,7 @@ static u8 run_target(char** argv) {
    is unlinked and a new one is created. Otherwise, out_fd is rewound and
    truncated. */
 
-static void write_to_testcase(void* mem, u32 len) {
+static void write_to_testcase(void* mem, u32 len) { //将变异后的测试用例写入到 /output/.cur_input中
 
   s32 fd = out_fd;
 
@@ -2865,7 +2867,7 @@ static void write_to_testcase(void* mem, u32 len) {
 
   } else lseek(fd, 0, SEEK_SET);
 
-  ck_write(fd, mem, len, out_file);
+  ck_write(fd, mem, len, out_file);//将mem的内容写入到fd中,即/output/.cur_input下
 
   if (!out_file) {
 
@@ -2934,13 +2936,13 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
   q->cal_failed++;
 
   stage_name = "calibration";
-  stage_max  = no_var_check ? CAL_CYCLES_NO_VAR : CAL_CYCLES;
+  stage_max  = no_var_check ? CAL_CYCLES_NO_VAR : CAL_CYCLES; //循环次数
 
   /* Make sure the forkserver is up before we do anything, and let's not
      count its spin-up time toward binary calibration. */
 
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
-    init_forkserver(argv);
+    init_forkserver(argv); //setup forkserver  一种argv是启动qemu的参数
 
   start_us = get_cur_time_us();
 
@@ -2950,9 +2952,9 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
-    write_to_testcase(use_mem, q->len);
+    write_to_testcase(use_mem, q->len); //将测试用例的值保存到/output/.cur_input下
 
-    fault = run_target(argv);
+    fault = run_target(argv); //argv指向目标程序,运行的内容是什么
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
@@ -2960,15 +2962,15 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     if (stop_soon || fault != crash_mode) goto abort_calibration;
 
     if (!dumb_mode && !stage_cur && !count_bytes(trace_bits)) {
-      fault = FAULT_NOINST;
-      goto abort_calibration;
+      fault = FAULT_NOINST; //没有命中基本块
+      goto abort_calibration;  //该测试用例不行? 还有时间限制,调试的时候容易hang住
     }
 
     cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-    if (q->exec_cksum != cksum) {
+    if (q->exec_cksum != cksum) { //判断是否有新的路径?
 
-      u8 hnb = has_new_bits(virgin_bits);
+      u8 hnb = has_new_bits(virgin_bits); //函数里调用了trace_bits hnb=2表示运行到基本块了
       if (hnb > new_bits) new_bits = hnb;
 
       if (!no_var_check && q->exec_cksum) {
@@ -3051,7 +3053,7 @@ static void check_map_coverage(void) {
 /* Perform dry run of all test cases to confirm that the app is working as
    expected. This is done only for the initial inputs, and only once. */
 
-static void perform_dry_run(char** argv) {
+static void perform_dry_run(char** argv) { //这个是参数集合
 
   struct queue_entry* q = queue;
   u32 cal_failures = 0;
@@ -3059,15 +3061,15 @@ static void perform_dry_run(char** argv) {
 
   while (q) {
 
-    u8* use_mem;
+    u8* use_mem; //testcase的内容
     u8  res;
     s32 fd;
 
-    u8* fn = strrchr(q->fname, '/') + 1;
+    u8* fn = strrchr(q->fname, '/') + 1;//strchr,最后一次出现的位置,即指向最后的文件名
 
     ACTF("Attempting dry run with '%s'...", fn);
 
-    fd = open(q->fname, O_RDONLY);
+    fd = open(q->fname, O_RDONLY); //成功返回文件描述符
     if (fd < 0) PFATAL("Unable to open '%s'", q->fname);
 
     use_mem = ck_alloc_nozero(q->len);
@@ -3076,15 +3078,16 @@ static void perform_dry_run(char** argv) {
       FATAL("Short read from '%s'", q->fname);
 
     close(fd);
-
-    res = calibrate_case(argv, q, use_mem, 0, 1);
+    ///完成testcase 内容复制
+    res = calibrate_case(argv, q, use_mem, 0, 1); //测试用例的可用性测试 返回运行结果
     ck_free(use_mem);
+
 
     if (stop_soon) return;
 
-    if (res == crash_mode || res == FAULT_NOBITS)
+    if (res == crash_mode || res == FAULT_NOBITS) //??
       SAYF(cGRA "    len = %u, map size = %u, exec speed = %llu us\n" cRST, 
-           q->len, q->bitmap_size, q->exec_us);
+           q->len, q->bitmap_size, q->exec_us); //用于显示
 
     switch (res) {
 
@@ -3092,7 +3095,7 @@ static void perform_dry_run(char** argv) {
 
         if (q == queue) check_map_coverage();
 
-        if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
+        if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn); //fatal 退出了
 
         break;
 
@@ -5281,7 +5284,7 @@ static u8 fuzz_one(char** argv) {
   cur_depth = queue_cur->depth;
 
   /*******************************************
-   * CALIBRATION (only if failed earlier on) *
+   * CALIBRATION (only if failed earlier on) *  //判断之前的calibration是否成功
    *******************************************/
 
   if (queue_cur->cal_failed) {
@@ -5308,9 +5311,9 @@ static u8 fuzz_one(char** argv) {
    * TRIMMING *
    ************/
 
-  if (!dumb_mode && !queue_cur->trim_done) {
+  if (!dumb_mode && !queue_cur->trim_done) { //插桩模式,且测试用例没有trim过
 
-    u8 res = trim_case(argv, queue_cur, in_buf);
+    u8 res = trim_case(argv, queue_cur, in_buf); //argv指向目标程序
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
@@ -5328,7 +5331,7 @@ static u8 fuzz_one(char** argv) {
 
   }
 
-  memcpy(out_buf, in_buf, len);
+  memcpy(out_buf, in_buf, len); //in_buf指向的值赋值给out_buf指向的值 即将测试用例内容赋值给out_buf
 
   /*********************
    * PERFORMANCE SCORE *
@@ -5356,7 +5359,7 @@ static u8 fuzz_one(char** argv) {
   /* Single walking bit. */
 
   stage_short = "flip1";
-  stage_max   = len << 3;
+  stage_max   = len << 3; //测试用例长度*8
   stage_name  = "bitflip 1/1";
 
   stage_val_type = STAGE_VAL_NONE;
@@ -5369,11 +5372,11 @@ static u8 fuzz_one(char** argv) {
 
     stage_cur_byte = stage_cur >> 3;
 
-    FLIP_BIT(out_buf, stage_cur);
+    FLIP_BIT(out_buf, stage_cur); //对out_buf中的内容做了操作,根据stage_cur有不同的更改
 
     if (common_fuzz_stuff(argv, out_buf, len)) goto abandon_entry;
 
-    FLIP_BIT(out_buf, stage_cur);
+    FLIP_BIT(out_buf, stage_cur); //对out_buf中的内容做了操作 换回来
 
     /* While flipping the least significant bit in every byte, pull of an extra
        trick to detect possible syntax tokens. In essence, the idea is that if
@@ -5444,9 +5447,9 @@ static u8 fuzz_one(char** argv) {
 
   }
 
-  new_hit_cnt = queued_paths + unique_crashes;
+  new_hit_cnt = queued_paths + unique_crashes; //难道是执行的路径的某个信息
 
-  stage_finds[STAGE_FLIP1]  += new_hit_cnt - orig_hit_cnt;
+  stage_finds[STAGE_FLIP1]  += new_hit_cnt - orig_hit_cnt; //可能是某个stage运行的次数
   stage_cycles[STAGE_FLIP1] += stage_max;
 
   if (queue_cur->passed_det) goto havoc_stage;
@@ -5473,7 +5476,7 @@ static u8 fuzz_one(char** argv) {
 
   }
 
-  new_hit_cnt = queued_paths + unique_crashes;
+  new_hit_cnt = queued_paths + unique_crashes;//
 
   stage_finds[STAGE_FLIP2]  += new_hit_cnt - orig_hit_cnt;
   stage_cycles[STAGE_FLIP2] += stage_max;
@@ -7728,16 +7731,16 @@ static void check_asan_opts(void) {
 
 /* Detect @@ in args. */
 
-static void detect_file_args(char** argv) {
+static void detect_file_args(char** argv) { //这个argv的位置
 
   u32 i = 0;
-  u8* cwd = getcwd(NULL, 0);
+  u8* cwd = getcwd(NULL, 0);//获取当前工作目录,字符串大小会自动配置
 
   if (!cwd) PFATAL("getcwd() failed");
 
   while (argv[i]) {
 
-    u8* aa_loc = strstr(argv[i], "@@");
+    u8* aa_loc = strstr(argv[i], "@@");//返回@@在argv[i]中首次出现的地址,否则返回null
 
     if (aa_loc) {
 
@@ -7751,7 +7754,7 @@ static void detect_file_args(char** argv) {
       /* Be sure that we're always using fully-qualified paths. */
 
       if (out_file[0] == '/') aa_subst = out_file;
-      else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+      else aa_subst = alloc_printf("%s/%s", cwd, out_file); //使用全路径形式.
 
       /* Construct a replacement argv value. */
 
@@ -7819,17 +7822,17 @@ static void setup_signal_handlers(void) {
 
 
 /* Rewrite argv for QEMU. */
-
+//argv是 aflout2  .cur_input 	 2个参数
 static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
 
   char** new_argv = ck_alloc(sizeof(char*) * (argc + 4));
   u8 *tmp, *cp, *rsl, *own_copy;
 
-  memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc);
+  memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc); //将 .cur_input赋值给new_argv
 
   new_argv[2] = target_path;
   new_argv[1] = "--";
-
+  //最后是 `-- aflout2 .cur_intput`
   /* Now we need to actually find the QEMU binary to put in argv[0]. */
 
   tmp = getenv("AFL_PATH");
@@ -7846,19 +7849,19 @@ static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
 
   }
 
-  own_copy = ck_strdup(own_loc);
+  own_copy = ck_strdup(own_loc);//取 afl-fuzz所在的目录
   rsl = strrchr(own_copy, '/');
 
   if (rsl) {
 
     *rsl = 0;
 
-    cp = alloc_printf("%s/afl-qemu-trace", own_copy);
+    cp = alloc_printf("%s/afl-qemu-trace", own_copy); //cp指向afl-yyy/afl-qemu-trace
     ck_free(own_copy);
 
     if (!access(cp, X_OK)) {
-
-      target_path = new_argv[0] = cp;
+    	//没有执行权限
+      target_path = new_argv[0] = cp;//最后new_argv是`afl-qemu-trace -- aflout2 .cur_intput`
       return new_argv;
 
     }
@@ -7910,7 +7913,7 @@ static void save_cmdline(u32 argc, char** argv) {
 
   }
 
-  *buf = 0;
+  *buf = 0; //命令行中的值保存在buf中,然后呢?
 
 }
 
@@ -7931,25 +7934,25 @@ int main(int argc, char** argv) {
 
   SAYF(cCYA "afl-fuzz " cBRI VERSION cRST " by <lcamtuf@google.com>\n");
 
-  doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
+  doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;  //doc_path is static variable
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:L")) > 0) {
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:L")) > 0) { //getopt 系统调用
 
     switch (opt) {
 
       case 'i':
 
         if (in_dir) FATAL("Multiple -i options not supported");
-        in_dir = optarg;
+        in_dir = optarg; //配置输入测试用例的目录
 
-        if (!strcmp(in_dir, "-")) in_place_resume = 1;
+        if (!strcmp(in_dir, "-")) in_place_resume = 1;  //strcmp 比较连个字符串
 
         break;
 
       case 'o': /* output dir */
 
         if (out_dir) FATAL("Multiple -o options not supported");
-        out_dir = optarg;
+        out_dir = optarg; //输出结构的目录
         break;
 
       case 'M':
@@ -8079,7 +8082,7 @@ int main(int argc, char** argv) {
         if (qemu_mode) FATAL("Multiple -Q options not supported");
         qemu_mode = 1;
 
-        if (!mem_limit_given) mem_limit = MEM_LIMIT_QEMU;
+        if (!mem_limit_given) mem_limit = MEM_LIMIT_QEMU; //限制qemu的内存上限
 
         break;
 
@@ -8296,10 +8299,10 @@ int main(int argc, char** argv) {
 
   //  exit(0); //TESTING
     
-  if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
+  if (optind == argc || !in_dir || !out_dir) usage(argv[0]); //判断参数完整性
 
   setup_signal_handlers();
-  check_asan_opts();
+  check_asan_opts(); //asan是什么
 
   if (sync_id) fix_up_sync();
 
@@ -8327,40 +8330,44 @@ int main(int argc, char** argv) {
   check_if_tty();
 
   get_core_count();
-  check_crash_handling();
-  check_cpu_governor();
+  check_crash_handling();//往系统中添加一些configure
+  check_cpu_governor();//处理核心模式,ok
 
   setup_post();
-  setup_shm();
+  setup_shm();//trace_bits指针(静态)指向该共享内存.
 
-  setup_dirs_fds();
-  read_testcases();
+  setup_dirs_fds();//创建各种目录
+  read_testcases();//将测试用例添加到queue栈中
   load_auto();
 
-  pivot_inputs();
+  pivot_inputs();//处理input,转移到/output/queue下   pivot 转移
 
   if (extras_dir) load_extras(extras_dir);
 
   if (!timeout_given) find_timeout();
 
-  detect_file_args(argv + optind + 1);
+  detect_file_args(argv + optind + 1); //查看最后是否有@@符号.将指向@@参数的指针修改成指向.cur_input
 
-  if (!out_file) setup_stdio_file();
+  if (!out_file) setup_stdio_file(); //设置.cur_input文件
 
   check_binary(argv[optind]);
 
   start_time = get_cur_time();
 
   if (qemu_mode)
-    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
+	//argv[0]指向afl-fuzz
+	//argv + optind指向目标程序
+	//最后返回值是`afl-qemu-trace  --  aflout2 .cur_intput`
+	//argc-optind表示use_argv中参数的个数
+    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind); //获得启动qemu的参数
   else
-    use_argv = argv + optind;
+    use_argv = argv + optind;//执行的程序以及参数
 
-  perform_dry_run(use_argv);
+  perform_dry_run(use_argv); //测试初始测试用例的可用性吧?! ,形成了一个top_rated数组
 
-  cull_queue();
+  cull_queue(); //约简测试用例
 
-  show_init_stats();
+  show_init_stats();//图像数据显示
 
   seek_to = find_start_position();
 
@@ -8377,11 +8384,11 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  while (1) {
+  while (1) { //死循环,一直跑
 
     u8 skipped_fuzz;
 
-    cull_queue();
+    cull_queue(); //对top_rated数组进行操作
 
     if (!queue_cur) {
 
@@ -8419,12 +8426,12 @@ int main(int argc, char** argv) {
 
     }
 
-    skipped_fuzz = fuzz_one(use_argv);
+    skipped_fuzz = fuzz_one(use_argv); //从此正式开始fuzz
 
     if (!stop_soon && sync_id && !skipped_fuzz) {
       
       if (!(sync_interval_cnt++ % SYNC_INTERVAL))
-        sync_fuzzers(use_argv);
+        sync_fuzzers(use_argv); //从其他fuzzer中获取testcase
 
     }
 
