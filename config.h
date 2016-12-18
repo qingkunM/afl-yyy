@@ -177,7 +177,7 @@
 
 /* Maximum effector density past which everything is just fuzzed
    unconditionally (%): */
-
+//一个关键block的比例
 #define EFF_MAX_PERC        90
 
 /* UI refresh frequency (Hz): */

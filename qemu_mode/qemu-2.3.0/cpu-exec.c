@@ -299,7 +299,7 @@ static TranslationBlock *tb_find_slow(CPUArchState *env,
  not_found:
    /* if no translated code available, then translate it now */
 
-    tb = tb_gen_code(cpu, pc, cs_base, flags, 0); //寻找翻译后的tb
+    tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
 
     AFL_QEMU_CPU_SNIPPET1;
 

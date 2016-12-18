@@ -221,9 +221,9 @@ static void afl_forkserver(CPUArchState *env) {
 
 /* The equivalent of the tuple logging routine from afl-as.h. */
 
-static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执行的指令
+static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执行的指令  这里是基本块的首地址
 
-  static abi_ulong prev_loc; //这个指令的地址应该是32位的
+  static abi_ulong prev_loc; //这个指令的地址应该是32位的  静态初始为0
 
   /* Optimize for cur_loc > afl_end_code, which is the most likely case on
      Linux systems. */
@@ -238,15 +238,15 @@ static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执
      something quasi-uniform. */
 
   cur_loc  = (cur_loc >> 4) ^ (cur_loc << 8); //^表示按位异或
-  cur_loc &= MAP_SIZE - 1;
+  cur_loc &= MAP_SIZE - 1; // 取低16位,就够能够表示了  trace_bit也只有64kb
 
   /* Implement probabilistic instrumentation by looking at scrambled block
      address. This keeps the instrumented locations stable across runs. */
 
   if (cur_loc >= afl_inst_rms) return;
 
-  afl_area_ptr[cur_loc ^ prev_loc]++; //afl_area_ptr指向共享内存,
-  prev_loc = cur_loc >> 1;
+  afl_area_ptr[cur_loc ^ prev_loc]++; //afl_area_ptr指向共享内存,  trace_bit的对应字节+1(这里是8192个字节)
+  prev_loc = cur_loc >> 1; //右移一位,prev_loc表示刚刚执行完的基本块地址
 
 }
 
@@ -260,7 +260,7 @@ static void afl_request_tsl(target_ulong pc, target_ulong cb, uint64_t flags) { 
 
   struct afl_tsl t;
 
-  if (!afl_fork_child) return;
+  if (!afl_fork_child) return; //表示是否是fork出了子进程
 
   t.pc      = pc;
   t.cs_base = cb;

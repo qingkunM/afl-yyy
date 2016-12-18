@@ -55,7 +55,7 @@ typedef int64_t  s64;
 #  define MIN(_a,_b) ((_a) > (_b) ? (_b) : (_a))
 #  define MAX(_a,_b) ((_a) > (_b) ? (_a) : (_b))
 #endif /* !MIN */
-
+//前8位和后8位互换
 #define SWAP16(_x) ({ \
     u16 _ret = (_x); \
     (u16)((_ret << 8) | (_ret >> 8)); \
