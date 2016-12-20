@@ -127,19 +127,19 @@ static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
                    child_timed_out;   /* Traced process timed out?        */
 
-static u32 queued_paths,              /* Total number of queued testcases */
+static u32 queued_paths,              /* Total number of queued testcases */  //queue下的数量,包含初始测试用例
            queued_variable,           /* Testcases with variable behavior */
-           queued_at_start,           /* Total number of initial inputs   */
-           queued_discovered,         /* Items discovered during this run */
-           queued_imported,           /* Items imported via -S            */
+           queued_at_start,           /* Total number of initial inputs   */  //初始的数量
+           queued_discovered,         /* Items discovered during this run */  //本次执行增加的测试用例数量,不包含初始
+           queued_imported,           /* Items imported via -S            */  //导入的数量
            queued_favored,            /* Paths deemed favorable           */
-           queued_with_cov,           /* Paths with new coverage bytes    */ //发现一个新的元组关系就+1
-           pending_not_fuzzed,        /* Queued but not done yet          */
-           pending_favored,           /* Pending favored paths            */  //待fuzzone的测试用例,第二轮之后不判断
+           queued_with_cov,           /* Paths with new coverage bytes    */ //发现一个新的元组关系就+1(不考虑滚筒)
+           pending_not_fuzzed,        /* Queued but not done yet          */ //还没有fuzz过的测试用例
+           pending_favored,           /* Pending favored paths            */  //待fuzzone的测试用例,第二轮之后不判断,cull优化后的数量
            cur_skipped_paths,         /* Abandoned inputs in cur cycle    */
            cur_depth,                 /* Current path depth               */  //测试深度
            max_depth,                 /* Max path depth                   */
-           useless_at_start,          /* Number of useless starting paths */
+           useless_at_start,          /* Number of useless starting path  */
            current_entry,             /* Current queue entry ID           */
            havoc_div = 1;             /* Cycle count divisor for havoc    */
 
@@ -267,9 +267,9 @@ static u8* (*post_handler)(u8* buf, u32* len);
 
 /* Interesting values, as per config.h */
 
-static s8  interesting_8[]  = { INTERESTING_8 };
-static s16 interesting_16[] = { INTERESTING_8, INTERESTING_16 };
-static s32 interesting_32[] = { INTERESTING_8, INTERESTING_16, INTERESTING_32 };
+static s8  interesting_8[]  = { INTERESTING_8 }; //每个是1个字节
+static s16 interesting_16[] = { INTERESTING_8, INTERESTING_16 }; //每个是2个字节
+static s32 interesting_32[] = { INTERESTING_8, INTERESTING_16, INTERESTING_32 }; //每个是4个字节
 
 /* Fuzzing stages */
 
@@ -297,8 +297,8 @@ enum {
 
 enum {
   /* 00 */ STAGE_VAL_NONE,
-  /* 01 */ STAGE_VAL_LE,
-  /* 02 */ STAGE_VAL_BE
+  /* 01 */ STAGE_VAL_LE, //小端
+  /* 02 */ STAGE_VAL_BE  //大端模式
 };
 
 /* Execution status fault codes */
@@ -770,7 +770,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
     /* Optimize for *current == ~*virgin, since this will almost always be the
        case. */
 
-    if (cur & vir) {  //判断当前的元组关系是否出现过,没有出现过进入循环
+    if (cur & vir) {  //判断当前的元组关系(考虑滚筒)是否出现过,没有出现过进入循环
 
       if (ret < 2) { //ret 初始为0 ,一旦为2后一直不进入这个判断
 
@@ -796,8 +796,8 @@ static inline u8 has_new_bits(u8* virgin_map) {
         if (((cur & FF(0)) && (vir & FF(0)) == FF(0)) ||
             ((cur & FF(1)) && (vir & FF(1)) == FF(1)) ||
             ((cur & FF(2)) && (vir & FF(2)) == FF(2)) ||
-            ((cur & FF(3)) && (vir & FF(3)) == FF(3))) ret = 2;
-        else ret = 1;
+            ((cur & FF(3)) && (vir & FF(3)) == FF(3))) ret = 2; //第一次出现该元组关系
+        else ret = 1; //第二次出现该元组关系
 
 #endif /* ^__x86_64__ */
 
@@ -3496,7 +3496,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     }    
 
 #ifndef SIMPLE_FILES
-    //发现新的基本块了
+    //发现新的元组关系
     fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
                       describe_op(hnb));
 
@@ -3510,7 +3510,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     if (hnb == 2) {
       queue_top->has_new_cov = 1;
-      queued_with_cov++;
+      queued_with_cov++; //没有考虑滚筒的变换
     }
 
     queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
@@ -3632,7 +3632,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
   ck_free(fn);
 
-  return keeping;
+  return keeping; //1 表示有新的元组关系出现
 
 }
 
@@ -5036,21 +5036,21 @@ static u8 could_be_bitflip(u32 xor_val) { //参数是异或后的值
 
   /* Shift left until first bit set. */
 
-  while (!(xor_val & 1))
+  while (!(xor_val & 1)) //统计右边0的位数,然后右移
   { sh++; xor_val >>= 1; }
 
   /* 1-, 2-, and 4-bit patterns are OK anywhere. */
 
-  if (xor_val == 1 || xor_val == 3 || xor_val == 15)
+  if (xor_val == 1 || xor_val == 3 || xor_val == 15) //如果1,3,15,表示之前是有1/2/4位取反,是bitflip阶段
 	  return 1;
 
   /* 8-, 16-, and 32-bit patterns are OK only if shift factor is
      divisible by 8, since that's the stepover for these ops. */
 
-  if (sh & 7)
+  if (sh & 7) //如果sh为0 8 16 24 32,即是一个字节单位的变换,还要进一步判断是是否为8/16/32位bitflip阶段
 	  return 0;
 
-  if (xor_val == 0xff || xor_val == 0xffff || xor_val == 0xffffffff)
+  if (xor_val == 0xff || xor_val == 0xffff || xor_val == 0xffffffff) //判断是否为8/16/32位bitflip阶段
     return 1;
 
   return 0;
@@ -5629,8 +5629,8 @@ static u8 fuzz_one(char** argv) {
     /* Let's consult the effector map... */
 
     if (!eff_map[EFF_APOS(i)] && !eff_map[EFF_APOS(i + 1)]) {
-      stage_max--; //记录测试的次数
-      continue;  //如果第i个字节和第i+1个字节所在的block中有一个不受影响,则跳过本次
+     stage_max--; //记录测试的次数
+     continue;  //如果第i个字节和第i+1个字节所在的block中有一个不受影响,则跳过本次
     }
 
     stage_cur_byte = i;
@@ -5718,7 +5718,7 @@ skip_bitflip:
 
     for (j = 1; j <= ARITH_MAX; j++) {
 
-      u8 r = orig ^ (orig + j);//orig不是指针
+      u8 r = orig ^ (orig + j);//orig不是指针,orig + j的值会溢出,不会大于256
 
       /* Do arithmetic operations only if the result couldn't be a product
          of a bitflip. */
@@ -5769,7 +5769,7 @@ skip_bitflip:
 
   for (i = 0; i < len - 1; i++) {
 
-    u16 orig = *(u16*)(out_buf + i);//一次取了两个字节
+    u16 orig = *(u16*)(out_buf + i);//一次取了两个字节,步长是1个字节
 
     /* Let's consult the effector map... */
 
@@ -5782,7 +5782,7 @@ skip_bitflip:
 
     for (j = 1; j <= ARITH_MAX; j++) {
 
-      u16 r1 = orig ^ (orig + j),
+      u16 r1 = orig ^ (orig + j), //值不会大于65536,,这两个字节之间有进位
           r2 = orig ^ (orig - j),
           r3 = orig ^ SWAP16(SWAP16(orig) + j), //swap宏是互换前8位和后8位,为了考虑大端和小端
           r4 = orig ^ SWAP16(SWAP16(orig) - j);
@@ -5794,7 +5794,7 @@ skip_bitflip:
 
       stage_val_type = STAGE_VAL_LE;  //小端
 
-      if ((orig & 0xff) + j > 0xff && !could_be_bitflip(r1)) {
+      if ((orig & 0xff) + j > 0xff && !could_be_bitflip(r1)) {  //必须要进位,否则和8bit的计算阶段一样了
 
         stage_cur_val = j;
         *(u16*)(out_buf + i) = orig + j;//低8位的处理
@@ -5804,7 +5804,7 @@ skip_bitflip:
  
       } else stage_max--;
 
-      if ((orig & 0xff) < j && !could_be_bitflip(r2)) {
+      if ((orig & 0xff) < j && !could_be_bitflip(r2)) {//必须退位
 
         stage_cur_val = -j;
         *(u16*)(out_buf + i) = orig - j;
@@ -6006,7 +6006,7 @@ skip_arith:
   stage_name  = "interest 16/8";
   stage_short = "int16";
   stage_cur   = 0;
-  stage_max   = 2 * (len - 1) * (sizeof(interesting_16) >> 1);
+  stage_max   = 2 * (len - 1) * (sizeof(interesting_16) >> 1); //每个interesting_16数组中每个是2个字节
 
   orig_hit_cnt = new_hit_cnt;
 
@@ -6074,7 +6074,7 @@ skip_arith:
   stage_name  = "interest 32/8";
   stage_short = "int32";
   stage_cur   = 0;
-  stage_max   = 2 * (len - 3) * (sizeof(interesting_32) >> 2);
+  stage_max   = 2 * (len - 3) * (sizeof(interesting_32) >> 2); //数组中每个是4个字节
 
   orig_hit_cnt = new_hit_cnt;
 

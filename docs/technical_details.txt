@@ -325,7 +325,7 @@ as normally block-aligned tar archives, the gains can be as high as 90%.
 
 Because the underlying "effector maps" are local every queue entry and remain
 in force only during deterministic stages that do not alter the size or the
-general layout of the underlying file, this mechanism appears to work very
+general ldxxxxxdayout of the underlying file, this mechanism appears to work very
 reliably and proved to be simple to implement.
 
 7) Dictionaries

@@ -1,7 +1,15 @@
-# 忽略*.o和*.a文件
- *.[oa]
-
-# 忽略*.b和*.B文件
-*.[bB]
-
-
+afl-analyze
+afl-as
+afl-clang
+afl-clang++
+afl-fuzz
+afl-g++
+afl-gcc
+afl-gotcpu
+afl-showmap
+afl-tmin
+as
+./qemu-2.3.0/qemu-2.3.0
+./qemu-2.3.0/qemu-2.3.0.tar.bz2
+./qemu-2.3.0/yybuild_qemu_support.sh
+./fuse_*
