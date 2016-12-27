@@ -105,14 +105,14 @@ static inline void* DFL_ck_alloc_nozero(u32 size) {
   if (!size) return NULL;
 
   ALLOC_CHECK_SIZE(size);
-  ret = malloc(size + ALLOC_OFF_TOTAL);
+  ret = malloc(size + ALLOC_OFF_TOTAL); //多了9个字节
   ALLOC_CHECK_RESULT(ret, size);
 
-  ret += ALLOC_OFF_HEAD;
+  ret += ALLOC_OFF_HEAD;//增大了指针
 
-  ALLOC_C1(ret) = ALLOC_MAGIC_C1;
-  ALLOC_S(ret)  = size;
-  ALLOC_C2(ret) = ALLOC_MAGIC_C2;
+  ALLOC_C1(ret) = ALLOC_MAGIC_C1;//设置前面的4个字节
+  ALLOC_S(ret)  = size;//设置中间的4个字节的值为长度
+  ALLOC_C2(ret) = ALLOC_MAGIC_C2;//设置末尾的一个字节,结尾符号
 
   return ret;
 

@@ -127,7 +127,7 @@ static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
                    child_timed_out;   /* Traced process timed out?        */
 
-static u32 queued_paths,              /* Total number of queued testcases */  //queue下的数量,包含初始测试用例
+static u32 queued_paths,              /* Total number of queued testcases */  //queue下的数量,包含初始测试用例, 比id大1.
            queued_variable,           /* Testcases with variable behavior */
            queued_at_start,           /* Total number of initial inputs   */  //初始的数量
            queued_discovered,         /* Items discovered during this run */  //本次执行增加的测试用例数量,不包含初始
@@ -164,15 +164,15 @@ static u32 subseq_hangs;              /* Number of hangs in a row         */
 
 static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
           *stage_short,               /* Short stage name                 */
-          *syncing_party;             /* Currently syncing with...        */
+          *syncing_party;             /* Currently syncing with...        */  //表示同步的fuzzer名称
 
 static s32 stage_cur, stage_max;      /* Stage progression                */  //记录了某一阶段的测试次数
-static s32 splicing_with = -1;        /* Splicing with which test case?   */
+static s32 splicing_with = -1;        /* Splicing with which test case?   */  //随机选择一个别的测试用例
 
 static u32 syncing_case;              /* Syncing with case #...           */
 
-static s32 stage_cur_byte,            /* Byte offset of current stage op  */
-           stage_cur_val;             /* Value used for stage op          */
+static s32 stage_cur_byte,            /* Byte offset of current stage op  */ //havod阶段会设置成-1
+           stage_cur_val;             /* Value used for stage op          */  //表示加减的值
 
 static u8  stage_val_type;            /* Value type (STAGE_VAL_*)         */
 
@@ -223,7 +223,7 @@ struct queue_entry {
       trim_done,                      /* Trimmed?                         */
       was_fuzzed,                     /* Had any fuzzing done yet?        */
       passed_det,                     /* Deterministic stages passed?     */
-      has_new_cov,                    /* Triggers new coverage?           */ //表示有新的元组关系
+      has_new_cov,                    /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
       var_behavior,                   /* Variable behavior?               */
       favored,                        /* Currently favored?               */
       fs_redundant;                   /* Marked as redundant in the fs?   */
@@ -240,6 +240,15 @@ struct queue_entry {
 
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
+#ifdef XIAOSA
+  s32 parent_id;					  /* the parent test case id*/
+  s32 self_id;					      /* the self test case id*/
+  u8 *change_op;					  /* mark the change operate*/
+  s32 nm_child;				 	     /* count the child number*/
+  u64 fuzz_us;						/*the time of function of fuzzone*/
+  u8  in_top_rate;					/*to mark the testcase is in the top_rate*/
+
+#endif
 
 };
 
@@ -315,7 +324,7 @@ enum {
 
 /* Get unix time in milliseconds */
 
-static u64 get_cur_time(void) {
+static u64 get_cur_time(void) { //毫秒
 
   struct timeval tv;
   struct timezone tz;
@@ -327,7 +336,7 @@ static u64 get_cur_time(void) {
 }
 
 
-/* Get unix time in microseconds */
+/* Get unix time in microseconds */ //微秒
 
 static u64 get_cur_time_us(void) {
 
@@ -632,7 +641,7 @@ static void mark_as_redundant(struct queue_entry* q, u8 state) {
 
 static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
-  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry));
+  struct queue_entry* q = ck_alloc(sizeof(struct queue_entry)); //这里初始化都是0
 
   q->fname        = fname;
   q->len          = len;
@@ -854,8 +863,8 @@ static u32 count_bits(u8* mem) { //统计mem中的1的位数
 /* Count the number of bytes set in the bitmap. Called fairly sporadically,
    mostly to update the status screen or calibrate and examine confirmed
    new paths. */
-
-static u32 count_bytes(u8* mem) { //统计trace_bits 中非0的字节数,即命中的基本块数量
+//统计非0
+static u32 count_bytes(u8* mem) { //统计trace_bits 中非0的字节数,即命中的元组的数量
 
   u32* ptr = (u32*)mem;
   u32  i   = (MAP_SIZE >> 2);  //2^14个字节  4个字节处理一次
@@ -880,7 +889,7 @@ static u32 count_bytes(u8* mem) { //统计trace_bits 中非0的字节数,即命�
 
 /* Count the number of non-255 bytes set in the bitmap. Used strictly for the
    status screen, several calls per second or so. */
-
+//统计非全1
 static u32 count_non_255_bytes(u8* mem) { //没有考虑滚筒策略,统计virgin_bit中出现过的元组关系数量
 
   u32* ptr = (u32*)mem;
@@ -1082,9 +1091,14 @@ static void minimize_bits(u8* dst, u8* src) {
 
   u32 i = 0;
 
+
   while (i < MAP_SIZE) { //65536次循环
 
-    if (*(src++)) dst[i >> 3] |= 1 << (i & 7); //i&7就是0到7的循环  //这种计算方式贼快 7 is 0b111
+    if (*(src++))
+    {
+    	dst[i >> 3] |= 1 << (i & 7); //i&7就是0到7的循环  //这种计算方式贼快 7 is 0b111
+
+    }
     i++;
 
   }
@@ -1109,7 +1123,6 @@ static void update_bitmap_score(struct queue_entry* q) { //判断是否将测试
 
   /* For every byte set in trace_bits[], see if there is a previous winner,
      and how it compares to us. */
-
   for (i = 0; i < MAP_SIZE; i++) //65536次,每次一个字节.
 
     if (trace_bits[i]) { //每个测试轨迹 例运行到该基本块时,比较一个数值,将值最小的testcase记录到top_rated数组中
@@ -1126,6 +1139,9 @@ static void update_bitmap_score(struct queue_entry* q) { //判断是否将测试
          if (!--top_rated[i]->tc_ref) {  //--表示自减,如果tc_ref是1,判断为真 之前的测试用例引用次数减1
            ck_free(top_rated[i]->trace_mini);//表示这个测试用例没有被引用了
            top_rated[i]->trace_mini = 0;
+		#ifdef XIAOSA
+           q->in_top_rate=0;
+		#endif
          }
 
        }
@@ -1134,16 +1150,27 @@ static void update_bitmap_score(struct queue_entry* q) { //判断是否将测试
 
        top_rated[i] = q;
        q->tc_ref++;
+#ifdef XIAOSA
+       q->in_top_rate=1;
+#endif
 
        if (!q->trace_mini) {
          q->trace_mini = ck_alloc(MAP_SIZE >> 3); //分配一个8192个字节,每位对应trace_bit的一个字节
-         minimize_bits(q->trace_mini, trace_bits); //去除了滚筒关系
+         minimize_bits(q->trace_mini, trace_bits); //去除了滚筒关系 ,0表示没有元组关系,1表示有
        }
 
        score_changed = 1;
 
      }
-
+#ifdef XIAOSA
+  //mayby the testcase is not good ,so his trace_mini is not marked
+  //heren mark it
+  if (!q->trace_mini) {
+           q->trace_mini = ck_alloc(MAP_SIZE >> 3); //分配一个8192个字节,每位对应trace_bit的一个字节
+           minimize_bits(q->trace_mini, trace_bits); //去除了滚筒关系 ,0表示没有元组关系,1表示有
+           q->in_top_rate=0;
+  }
+#endif
 }
 
 
@@ -1153,7 +1180,7 @@ static void update_bitmap_score(struct queue_entry* q) { //判断是否将测试
    until the next run. The favored entries are given more air time during
    all fuzzing steps. */
 
-static void cull_queue(void) {
+static void cull_queue(void) {//比较的是元组级别的吧?
 
   struct queue_entry* q;
   static u8 temp_v[MAP_SIZE >> 3];//8192个字节
@@ -1170,7 +1197,7 @@ static void cull_queue(void) {
 
   q = queue;
 
-  while (q) { //把所有的q->favored,都设置为0
+  while (q) { //把所有的q->favored,都设置为0 ,每次都是重新排列,保证每次执行的测试用例都是局部最好的,这是贪婪算法.
     q->favored = 0;
     q = q->next;
   }
@@ -1189,7 +1216,7 @@ static void cull_queue(void) {
 
       while (j--)  //将top_rated[i]的执行轨加到temp_v中
         if (top_rated[i]->trace_mini[j]) //trace_mini[j]是top_rated[i]基本块的最优测试用例的执行迹,一个字节8为,表示8个元组关系,每8个元组关系做一次判断
-          //top_rated[i]表示运行到这个基本块的最优测试用例
+          //top_rated[i]表示运行到这个元组的最优测试用例
         	temp_v[j] &= ~top_rated[i]->trace_mini[j]; // ~按位取反后,0表示存在,1表示不存在;与temp_v相与后,temp_v中0表示这个元组关系被执行过,1表示没有
       	  	 //temp_v[j]记录了所有测试用例的执行迹
       top_rated[i]->favored = 1;//代表可以继续测试的测试用例
@@ -1345,7 +1372,7 @@ static void read_testcases(void) {
     if (!access(dfn, F_OK)) passed_det = 1;
     ck_free(dfn);
     //前面的操作都是虚的,目前没有作用
-    add_to_queue(fn, st.st_size, passed_det);
+    add_to_queue(fn, st.st_size, passed_det);//这个函数读取测试用例
 
   }
 
@@ -3388,7 +3415,7 @@ static void pivot_inputs(void) {
 /* Construct a file name for a new test case, capturing the operation
    that led to its discovery. Uses a static buffer. */
 
-static u8* describe_op(u8 hnb) {
+static u8* describe_op(u8 hnb) { //这个函数记录了测试用例的操作
 
   static u8 ret[256];
 
@@ -3398,7 +3425,7 @@ static u8* describe_op(u8 hnb) {
 
   } else {
 
-    sprintf(ret, "src:%06u", current_entry);
+    sprintf(ret, "src:%06u", current_entry); //变异来源
 
     if (splicing_with >= 0)
       sprintf(ret + strlen(ret), "+%06u", splicing_with);
@@ -3412,13 +3439,14 @@ static u8* describe_op(u8 hnb) {
       if (stage_val_type != STAGE_VAL_NONE)
         sprintf(ret + strlen(ret), ",val:%s%+d", 
                 (stage_val_type == STAGE_VAL_BE) ? "be:" : "",
-                stage_cur_val);
+                stage_cur_val); //stage_cur_val表示计算过程中加减的值,有正负
 
-    } else sprintf(ret + strlen(ret), ",rep:%u", stage_cur_val);
+    }
+    else sprintf(ret + strlen(ret), ",rep:%u", stage_cur_val); //havoc阶段的循环次数
 
   }
 
-  if (hnb == 2) strcat(ret, ",+cov");
+  if (hnb == 2) strcat(ret, ",+cov"); //全新的元组关系,不包括滚筒的升级
 
   return ret;
 
@@ -3481,6 +3509,9 @@ static void write_crash_readme(void) {
 static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
   u8  *fn = "";
+  #ifdef XIAOSA
+  u8  *tmpy="" ;
+  #endif
   u8  hnb;
   s32 fd;
   u8  keeping = 0, res;
@@ -3496,12 +3527,11 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     }    
 
 #ifndef SIMPLE_FILES
+
     //发现新的元组关系
-    fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
-                      describe_op(hnb));
+    fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,describe_op(hnb));
 
 #else
-
     fn = alloc_printf("%s/queue/id_%06u", out_dir, queued_paths);
 
 #endif /* ^!SIMPLE_FILES */
@@ -3518,15 +3548,80 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
 
-    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
+    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);//处理一下要新的测试用例
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
-
     fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
-    ck_write(fd, mem, len, fn);
+    ck_write(fd, mem, len, fn); //保存新的测试用例
     close(fd);
+
+	#ifdef XIAOSA
+	//保存新的测试用例的基本块信息
+    //这一部分可以写到minimize_bits函数里
+    tmpy = alloc_printf("%s/trace/id:%06u", out_dir, queued_paths-1);//前面add_to_queue使得queued_paths+1,这里-1保持id一致
+    remove(tmpy);
+    fd = open(tmpy, O_WRONLY |O_CREAT |O_APPEND, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", tmpy);
+    ck_free(tmpy);
+    //保存新的测试用例的trace
+    u32 i=0;
+    u32 j=0;
+    u16 ylen;
+    tmpy=alloc_printf("test %s in  the top_rate,block number is:%-6u\n",
+    		queue_top->in_top_rate?"":"not",queue_top->bitmap_size);
+    ylen = snprintf(NULL, 0, tmpy);
+    write(fd,tmpy,ylen);
+    ck_free(tmpy);
+    //remark the trace_bit of the testcase without the zero ones
+    if(queue_top->trace_mini != 0) //这里不可能有==0的时候
+        while (i < MAP_SIZE) { //65536次循环,16位11
+      	    if (queue_top->trace_mini[i>>3] & 1 << (i & 7))
+   	    {	//即该基本被执行
+   	    	if((j&15)==0 && (j!=0))
+   	    	write(fd,"\n",1);
+   	    	tmpy = alloc_printf("%6u ", i);
+   	    	ylen = snprintf(NULL, 0, tmpy);
+   	    	write(fd,tmpy,ylen); //保存新的测试用例
+   	    	ck_free(tmpy);
+   	    	j++;
+   	    }
+   	   	i++;
+   	   	if(stop_soon==1)
+   	   	{
+   	   	ck_free(tmpy);
+   	    close(fd);
+   	   	ck_free(fn);
+   	   	exit(1);}
+    }
+    close(fd);
+
+    #endif
+
+	#ifdef XIAOSA
+    //record some information
+    queue_cur->nm_child++;// child number add 1
+    queue_top->change_op=alloc_printf("%s", describe_op(hnb));
+    queue_top->parent_id=current_entry; //
+    queue_top->self_id=queued_paths-1; //
+
+    //ready to save some information, now there is much  redundance  to the file of /tmp/trace
+    s32 fd_xs;
+    //remove("/tmp/trace");
+    fd_xs = open("/tmp/trace", O_WRONLY |O_CREAT |O_APPEND, 0600); //需要追加的模式
+    if (fd_xs < 0) PFATAL("Unable to create '%s'", fn);
+    //fn_xs = alloc_printf("	%d->%d[label=\"%s\"];\n",queue_top->parent_id,queue_top->self_id, queue_top->change_op);
+    tmpy = alloc_printf("	%d->%d->%d;\n",queue_cur->parent_id,queue_cur->self_id,queue_top->self_id);
+    ck_write(fd_xs, tmpy, strlen(tmpy), NULL);
+    ck_free(tmpy);
+    // current test case is executed
+    tmpy = alloc_printf("	%d[shape=record];\n",queue_cur->self_id);
+    ck_write(fd_xs, tmpy, strlen(tmpy), NULL);
+    ck_free(tmpy);
+    close(fd_xs);
+
+	#endif
 
     keeping = 1;
 
@@ -3629,7 +3724,6 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
   if (fd < 0) PFATAL("Unable to create '%s'", fn);
   ck_write(fd, mem, len, fn);
   close(fd);
-
   ck_free(fn);
 
   return keeping; //1 表示有新的元组关系出现
@@ -4067,6 +4161,13 @@ static void maybe_delete_out_dir(void) {
   fn = alloc_printf("%s/queue", out_dir);
   if (delete_files(fn, CASE_PREFIX)) goto dir_cleanup_failed;
   ck_free(fn);
+
+#ifdef XIAOSA
+  //to remove the trace catalog
+  fn = alloc_printf("%s/trace", out_dir);
+  if (delete_files(fn, CASE_PREFIX)) goto dir_cleanup_failed;
+  ck_free(fn);
+#endif
 
   /* All right, let's do <out_dir>/crashes/id:* and <out_dir>/hangs/id:*. */
 
@@ -6311,7 +6412,7 @@ skip_extras:
 
 havoc_stage:
 
-  stage_cur_byte = -1;
+  stage_cur_byte = -1; //不知道偏移量了
 
   /* The havoc stage mutation code is also invoked when splicing files; if the
      splice_cycle variable is set, generate different descriptions and such. */
@@ -6350,7 +6451,7 @@ havoc_stage:
 
     u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2));//随机设置操作次数
 
-    stage_cur_val = use_stacking;
+    stage_cur_val = use_stacking; //记录采取的操作循环次数
  
     for (i = 0; i < use_stacking; i++) { //随机选择
 
@@ -6784,10 +6885,10 @@ retry_splicing:
 
     do { tid = UR(queued_paths); } while (tid == current_entry);
 
-    splicing_with = tid;
+    splicing_with = tid;  //表示选择的其他测试用例的id
     target = queue;
 
-    while (tid >= 100) { target = target->next_100; tid -= 100; }
+    while (tid >= 100) { target = target->next_100; tid -= 100; } //往前退100
     while (tid--) target = target->next;
 
     /* Make sure that the target has a reasonable length. */
@@ -6911,7 +7012,7 @@ static void sync_fuzzers(char** argv) { //参数是启动qemu的参数
     }
 
     /* Retrieve the ID of the last seen test case. */
-    //比如sync_dir/2/.synced/1
+    //比如sync_dir/2/.synced/1   新见了一个目录,存放同步来的其他fuzzer下queue下的测试用例
     qd_synced_path = alloc_printf("%s/.synced/%s", out_dir, sd_ent->d_name);
 
     id_fd = open(qd_synced_path, O_RDWR | O_CREAT, 0600);
@@ -6925,7 +7026,7 @@ static void sync_fuzzers(char** argv) { //参数是启动qemu的参数
 
     /* Show stats */    
 
-    sprintf(stage_tmp, "sync %u", ++sync_cnt);
+    sprintf(stage_tmp, "sync %u", ++sync_cnt); //状态叫做sync 1
     stage_name = stage_tmp;
     stage_cur  = 0;
     stage_max  = 0;
@@ -6974,8 +7075,8 @@ static void sync_fuzzers(char** argv) { //参数是启动qemu的参数
         if (stop_soon) return;
 
         syncing_party = sd_ent->d_name;
-        queued_imported += save_if_interesting(argv, mem, st.st_size, fault);//感兴趣就写入
-        syncing_party = 0;
+        queued_imported += save_if_interesting(argv, mem, st.st_size, fault);//感兴趣就写入,然后queued_imported+1
+        syncing_party = 0;//恢复
 
         munmap(mem, st.st_size);
 
@@ -7376,6 +7477,13 @@ static void setup_dirs_fds(void) {
   tmp = alloc_printf("%s/queue", out_dir);
   if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
   ck_free(tmp);
+
+  #ifdef XIAOSA
+  // mkdir  trace  catalog, to save the trace_bit of every testcase
+  tmp = alloc_printf("%s/trace", out_dir);
+  if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
+  ck_free(tmp);
+  #endif
 
   /* Top-level directory for queue metadata used for session
      resume and related tasks. */
@@ -7938,6 +8046,23 @@ int main(int argc, char** argv) {
   u32 sync_interval_cnt = 0, seek_to;
   u8  *extras_dir = 0;
   u8  mem_limit_given = 0;
+#ifdef XIAOSA
+  u64 fuzz_start_us, fuzz_stop_us;// to remark the time of function fuzzone
+  u8  tmp[256];// for calculate the fuzzone time
+#endif
+
+  /* add the "digraph graphname{" in the last place of the file of /tmp/trace */
+#ifdef XIAOSA
+  u8  *fn_xs = "";///yyy temp
+  remove("/tmp/trace");
+  s32 fd_xs;
+  fd_xs = open("/tmp/trace", O_WRONLY |O_CREAT |O_APPEND, 0600); //需要追加的模式
+  if (fd_xs < 0) PFATAL("Unable to create '%s'", "/tmp/trace");
+  fn_xs=alloc_printf("digraph graphname{\n");
+  ck_write(fd_xs, fn_xs, strlen(fn_xs), NULL);
+  ck_free(fn_xs);
+  close(fd_xs);
+#endif
 
   char** use_argv;
 
@@ -8388,8 +8513,10 @@ int main(int argc, char** argv) {
   /* Woop woop woop */
 
   if (!not_on_tty) {
-    sleep(4);
+#ifndef XIAOSA
+	sleep(4);
     start_time += 4000;
+#endif
     if (stop_soon) goto stop_fuzzing;
   }
 
@@ -8436,7 +8563,18 @@ int main(int argc, char** argv) {
 
     }
     	//qemu模式下 use_argv afl-qemu-trace -- afl-qemu-out .cur_input
-    skipped_fuzz = fuzz_one(use_argv); //从此正式开始fuzz.运行一次后
+#ifdef XIAOSA
+    fuzz_start_us=fuzz_stop_us=0;
+    fuzz_start_us=get_cur_time_us();
+#endif
+
+    skipped_fuzz = fuzz_one(use_argv); //从此正式开始fuzz.运行一次后 跑的快的肯定是被约简过的
+
+#ifdef XIAOSA
+    fuzz_stop_us=get_cur_time_us();
+    alloc_printf(tmp, "%s(sec)\n ", (fuzz_stop_us-fuzz_start_us)/100000);
+    queue_cur->fuzz_us=(fuzz_stop_us-fuzz_start_us)/100000;
+#endif
 
     if (!stop_soon && sync_id && !skipped_fuzz) {
       
@@ -8481,6 +8619,15 @@ stop_fuzzing:
   alloc_report();
 
   OKF("We're done here. Have a nice day!\n");
+  /* add the "}" in the last place of the file of /tmp/trace */
+ #ifdef XIAOSA
+  fd_xs = open("/tmp/trace", O_WRONLY |O_CREAT |O_APPEND, 0600); //需要追加的模式
+  if (fd_xs < 0) PFATAL("Unable to create '%s'", "/tmp/trace");
+  fn_xs=alloc_printf("}\n");
+  ck_write(fd_xs, fn_xs, strlen(fn_xs), NULL);
+  ck_free(fn_xs);
+  close(fd_xs);
+ #endif
 
   exit(0);
 
