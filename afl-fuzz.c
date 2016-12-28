@@ -3668,8 +3668,9 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 #ifdef XIAOSA
 		//保存新的测试用例的基本块信息
 		//这一部分可以写到minimize_bits函数里
-		tmpy = alloc_printf("%s/trace_mini/id:%06u", out_dir, queued_paths - 1); //前面add_to_queue使得queued_paths+1,这里-1保持id一致
-		remove(tmpy);
+		//tmpy = alloc_printf("%s/trace_mini/id:%06u", out_dir, queued_paths - 1); //前面add_to_queue使得queued_paths+1,这里-1保持id一致
+		tmpy = alloc_printf("%s/trace_mini/total", out_dir);
+		//remove(tmpy);
 		fd = open(tmpy, O_WRONLY | O_CREAT | O_APPEND, 0600);
 		if (fd < 0)
 			PFATAL("Unable to create '%s'", tmpy);
@@ -3678,12 +3679,13 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 		u32 i = 0;
 		u32 j = 0;
 		u16 ylen;
-		tmpy = alloc_printf("test %s in  the top_rate,block number is:%-6u\n",
-				queue_top->in_top_rate ? "" : "not", queue_top->bitmap_size);
+		tmpy = alloc_printf("id:%06u %s is in the top_rate, block number is:%-6u\n",
+				queued_paths,queue_top->in_top_rate ? "   " : "not", queue_top->bitmap_size);
 		ylen = snprintf(NULL, 0, tmpy);
 		write(fd, tmpy, ylen);
 		ck_free(tmpy);
 		//remark the trace_bit of the testcase without the zero ones
+#if 0
 		if (queue_top->trace_mini != 0) //这里为0,就是表示没有进入top_rate数组  xiaosa在update函数中修改了,所有的都记录
 			while (i < MAP_SIZE) { //65536次循环,16位11
 				if (queue_top->trace_mini[i >> 3] & 1 << (i & 7)) {	//即该基本被执行
@@ -3703,6 +3705,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 					exit(1);
 				}
 			}
+#endif
 		close(fd);
 
 #endif
