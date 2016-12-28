@@ -16,7 +16,9 @@
 
 #ifndef _HAVE_CONFIG_H
 #define _HAVE_CONFIG_H
-
+//yyy
+#define XIAOSA
+//yyy
 #include "types.h"
 
 /******************************************************

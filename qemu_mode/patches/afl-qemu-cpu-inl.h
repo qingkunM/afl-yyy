@@ -29,6 +29,10 @@
 #include <sys/shm.h>
 #include "../../config.h"
 
+//yyy
+#include <stdio.h>
+//yyy
+
 /***************************
  * VARIOUS AUXILIARY STUFF *
  ***************************/
@@ -229,7 +233,8 @@ static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执
      Linux systems. */
 
   if (cur_loc > afl_end_code || cur_loc < afl_start_code || !afl_area_ptr)
-    return;
+  return;
+
 
   /* Looks like QEMU always maps to fixed locations, so we can skip this:
      cur_loc -= afl_start_code; */

@@ -28,10 +28,6 @@
 
 #define ELF_OSABI   ELFOSABI_SYSV
 
-extern abi_ulong afl_entry_point, afl_start_code, afl_end_code; //添加的补丁，在afl-qemu-cpu-inl.h文件中定义
-
-extern abi_ulong afl_entry_point, afl_start_code, afl_end_code;
-
 extern abi_ulong afl_entry_point, afl_start_code, afl_end_code;
 
 /* from personality.h */
@@ -1885,9 +1881,9 @@ static void load_elf_image(const char *image_name, int image_fd,
     }
 #endif
 
-    info->load_bias = load_bias;  /*真实的加载地址和计算出来(读ELF头信息)的加载地址之差*/
-    info->load_addr = load_addr;  /*真实的加载地址*/
-    info->entry = ehdr->e_entry + load_bias;   /*重新调整下程序的入口*/
+    info->load_bias = load_bias;
+    info->load_addr = load_addr;
+    info->entry = ehdr->e_entry + load_bias;
     info->start_code = -1;
     info->end_code = 0;
     info->start_data = -1;
@@ -1895,7 +1891,7 @@ static void load_elf_image(const char *image_name, int image_fd,
     info->brk = 0;
     info->elf_flags = ehdr->e_flags;
 
-    if (!afl_entry_point) afl_entry_point = info->entry; //添加的补丁,在这里定义了入口地址
+    if (!afl_entry_point) afl_entry_point = info->entry;
 
     for (i = 0; i < ehdr->e_phnum; i++) {
         struct elf_phdr *eppnt = phdr + i;
@@ -1929,12 +1925,12 @@ static void load_elf_image(const char *image_name, int image_fd,
             /* Find the full program boundaries.  */
             if (elf_prot & PROT_EXEC) {
                 if (vaddr < info->start_code) {
-                    info->start_code = vaddr; /*代码段的起始虚拟地址（页对齐的地址）*/
-                    if (!afl_start_code) afl_start_code = vaddr; //添加的补丁
+                    info->start_code = vaddr;
+                    if (!afl_start_code) afl_start_code = vaddr;
                 }
                 if (vaddr_ef > info->end_code) {
-                    info->end_code = vaddr_ef;  /*代码段的结束虚拟地址（页对齐的地址）*/
-                    if (!afl_end_code) afl_end_code = vaddr_ef; //添加的补丁
+                    info->end_code = vaddr_ef;
+                    if (!afl_end_code) afl_end_code = vaddr_ef;
                 }
             }
             if (elf_prot & PROT_WRITE) {

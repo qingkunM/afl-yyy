@@ -139,7 +139,7 @@ echo "[+] Configuration complete."
 
 echo "[*] Attempting to build QEMU (fingers crossed!)..."
 
-make || exit 1
+make  -j8 || exit 1
 
 echo "[+] Build process successful!"
 
