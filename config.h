@@ -261,6 +261,10 @@
 
 #define SHM_ENV_VAR         "__AFL_SHM_ID"
 
+#ifdef XIAOSA
+	#define VIRGIN_COUNTS   "__AFL_SHM_ID_VIRGIN_COUNTS"
+#endif
+
 /* Other less interesting, internal-only variables. */
 
 #define CLANG_ENV_VAR       "__AFL_CLANG_MODE"

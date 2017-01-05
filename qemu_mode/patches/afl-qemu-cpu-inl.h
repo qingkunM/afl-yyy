@@ -67,6 +67,10 @@
 
 static unsigned char *afl_area_ptr;
 
+#ifdef XIAOSA
+static unsigned int  *afl_area_virgin_counts_ptr; //point to the SHM to counts the number of the tuple
+#endif
+
 /* Exported variables populated by the code patched into elfload.c: */
 
 abi_ulong afl_entry_point, /* ELF entry point (_start) */
@@ -116,6 +120,11 @@ static void afl_setup(void) {
   char *id_str = getenv(SHM_ENV_VAR),
        *inst_r = getenv("AFL_INST_RATIO"); //插桩比例?
 
+#ifdef XIAOSA
+  //for the SHM id of the execution number of the tuple
+  char *id_str_virgin_counts = getenv(VIRGIN_COUNTS);
+#endif
+
   int shm_id;
 
   if (inst_r) {
@@ -145,6 +154,18 @@ static void afl_setup(void) {
 
 
   }
+
+#ifdef XIAOSA
+  //for the SHM id of the execution number of the tuple
+  if (id_str_virgin_counts) {
+
+      shm_id = atoi(id_str_virgin_counts);
+      afl_area_virgin_counts_ptr = shmat(shm_id, NULL, 0);
+
+      if (afl_area_virgin_counts_ptr == (void*)-1) exit(1);
+
+    }
+#endif
 
   if (getenv("AFL_INST_LIBS")) {
 
@@ -233,7 +254,7 @@ static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执
      Linux systems. */
 
   if (cur_loc > afl_end_code || cur_loc < afl_start_code || !afl_area_ptr)
-  return;
+	  return;
 
 
   /* Looks like QEMU always maps to fixed locations, so we can skip this:
@@ -251,7 +272,14 @@ static inline void afl_maybe_log(abi_ulong cur_loc) { //参数是当前正在执
   if (cur_loc >= afl_inst_rms) return;
 
   afl_area_ptr[cur_loc ^ prev_loc]++; //afl_area_ptr指向共享内存,  trace_bit的对应字节+1(这里是8192个字节)
+#ifdef XIAOSA
+//#if 0
+  afl_area_virgin_counts_ptr[cur_loc ^ prev_loc]++;//indicate the number of the execution add 1
+#endif
+
   prev_loc = cur_loc >> 1; //右移一位,prev_loc表示刚刚执行完的基本块地址
+
+
 
 }
 
