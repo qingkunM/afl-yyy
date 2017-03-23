@@ -18,6 +18,7 @@
 #define _HAVE_CONFIG_H
 //yyy
 #define XIAOSA
+#define CGC
 //yyy
 #include "types.h"
 
@@ -128,8 +129,19 @@
 /* Limits for the test case trimmer. The absolute minimum chunk size; and
    the starting and ending divisors for chopping up the input file: */
 
-#define TRIM_MIN_BYTES      4
-#define TRIM_START_STEPS    16
+
+#ifdef XIAOSA
+	#define TRIM_MIN_BYTES      49	 //a definition by xiaosa
+#else
+	#define TRIM_MIN_BYTES      4  //default
+#endif
+
+#ifdef XIAOSA
+	#define TRIM_START_STEPS      16 //a definition by xiaosa
+#else
+	#define TRIM_START_STEPS      16 //default
+#endif
+
 #define TRIM_END_STEPS      1024
 
 /* Maximum size of input file, in bytes (keep under 100MB): */
@@ -218,7 +230,9 @@
    32,           /* One-off with common buffer size         */ \
    64,           /* One-off with common buffer size         */ \
    100,          /* One-off with common buffer size         */ \
-   127           /* Overflow signed 8-bit when incremented  */
+   127           /* Overflow signed 8-bit when incremented  */ 
+  
+
 
 #define INTERESTING_16 \
   -32768,        /* Overflow signed 16-bit when decremented */ \
@@ -230,7 +244,7 @@
    1000,         /* One-off with common buffer size         */ \
    1024,         /* One-off with common buffer size         */ \
    4096,         /* One-off with common buffer size         */ \
-   32767         /* Overflow signed 16-bit when incremented */
+   32767        /* Overflow signed 16-bit when incremented */
 
 #define INTERESTING_32 \
   -2147483648LL, /* Overflow signed 32-bit when decremented */ \
@@ -241,7 +255,7 @@
    65536,        /* Overflow unsig 16 bit                   */ \
    100663045,    /* Large positive number (endian-agnostic) */ \
    2147483647    /* Overflow signed 32-bit when incremented */
-
+   
 /***********************************************************
  *                                                         *
  *  Really exotic stuff you probably don't want to touch:  *
@@ -261,6 +275,7 @@
 
 #define SHM_ENV_VAR         "__AFL_SHM_ID"
 
+//yyy
 #ifdef XIAOSA
 	#define VIRGIN_COUNTS   "__AFL_SHM_ID_VIRGIN_COUNTS"
 #endif
@@ -312,7 +327,12 @@
    problems with complex programs). You need to recompile the target binary
    after changing this - otherwise, SEGVs may ensue. */
 
-#define MAP_SIZE_POW2       16
+#ifdef CGC
+	#define MAP_SIZE_POW2       17
+#else
+	#define MAP_SIZE_POW2       16
+#endif
+
 #define MAP_SIZE            (1 << MAP_SIZE_POW2)
 
 /* Maximum allocator request size (keep well under INT_MAX): */

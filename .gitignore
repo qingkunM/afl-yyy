@@ -9,7 +9,9 @@ afl-gotcpu
 afl-showmap
 afl-tmin
 as
-./qemu-2.3.0/qemu-2.3.0
-./qemu-2.3.0/qemu-2.3.0.tar.bz2
-./qemu-2.3.0/yybuild_qemu_support.sh
-./fuse_*
+afl-qemu-trace
+/qemu_mode/qemu-2.3.0
+/qemu_mode/qemu-2.3.0.tar.bz2
+/qemu_mode/yybuild_qemu_support.sh
+/fuse_*
+/qemu_mode/qemu-2.3.0/

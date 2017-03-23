@@ -157,10 +157,10 @@ static u32 	queued_paths ,			/* Total number of queued testcases */ //queue下�
 
 #ifdef XIAOSA
 
-static u32 	last_big_cycle_case_num; /*the number of the testcase in the queue catalog befor the last big cycle*/
-			add_case_num_last_big_cycle; /*the add number of the testcase in the queue catalog during the last big cycle*/
+	static u32 	last_big_cycle_case_num, /*the number of the testcase in the queue catalog befor the last big cycle*/
+			add_case_num_last_big_cycle, /*the add number of the testcase in the queue catalog during the last big cycle*/
 
-			last_big_cycle_crash_num; /*the number of the testcase in the crash catalog befor the last big cycle*/
+			last_big_cycle_crash_num, /*the number of the testcase in the crash catalog befor the last big cycle*/
 			add_crash_num_last_big_cycle; /*the add number of the testcase in the crash catalog during the last big cycle*/
 #endif
 
@@ -175,11 +175,18 @@ static u64 	total_crashes , 	/* Total number of crashes          */
 			last_hang_time , 	/* Time for most recent hang (ms)   */
 			queue_cycle , 		/* Queue round counter              */
 			cycles_wo_finds , 	/* Cycles without any new paths     */
-			trim_execs , 		/* Execs done to trim input files   */
+			trim_execs , 		/* Execs done to trim input files   */  //trim的次数
 			bytes_trim_in , 	/* Bytes coming into the trimmer    */  //进入trim的字节数
-			bytes_trim_out , 	/* Bytes coming outa the trimmer    */ //离开trim的字节数
+			bytes_trim_out , 	/* Bytes coming outa the trimmer    */ //被trim后剩余的字节数累计
 			blocks_eff_total , 	/* Blocks subject to effector maps  */ //总共的block数量
 			blocks_eff_select; 	/* Blocks selected as fuzzable      */ //关键block的数量
+
+#ifdef XIAOSA
+		u64	big_cycle_start_time;  /*the start time of every big cycle*/ //in second level
+		u64	big_cycle_stop_time;   /*the stop time of every big cycle*/
+		u64 time_of_big_cycle;	/*the  time of every big cycle*/
+		u64 main_start_time;	 /*record the start time of fucntion main, in us*/
+#endif
 
 static u32 subseq_hangs; /* Number of hangs in a row         */
 
@@ -240,36 +247,37 @@ struct queue_entry
 	u8* fname; /* File name for the test case      */
 	u32 len; /* Input length                     */
 
-	u8 cal_failed , /* Calibration failed?              */
-	trim_done , /* Trimmed?                         */
-	was_fuzzed , /* Had any fuzzing done yet?        */
-	passed_det , /* Deterministic stages passed?     */
-	has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
-			var_behavior , /* Variable behavior?               */
-			favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
-			fs_redundant; /* Marked as redundant in the fs?   */
+	u8 	cal_failed , /* Calibration failed?              */
+		trim_done , /* Trimmed?                         */
+		was_fuzzed , /* Had any fuzzing done yet?        */
+		passed_det , /* Deterministic stages passed?     */
+		has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
+		var_behavior , /* Variable behavior?               */
+		favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
+		fs_redundant; /* Marked as redundant in the fs?   */
 
 	u32 bitmap_size , /* Number of bits set in bitmap     */ //表示有多少元组跳跃关系
-			exec_cksum; /* Checksum of the execution trace  */
+		exec_cksum; /* Checksum of the execution trace  */
 
 	u64 exec_us , /* Execution time (us)              */  //每一个测试的平均时间
-			handicap , /* Number of queue cycles behind    */
-			depth; /* Path depth                       */  //这个怎么定义的?
+		handicap , /* Number of queue cycles behind    */
+		depth; /* Path depth                       */  //这个怎么定义的?
 
 	u8* trace_mini; /* Trace bytes, if kept  每一位对应trace_bit的一个字节 */
 	u32 tc_ref; /* Trace bytes ref count            */  //被top_rated引用的次数
 
 	struct queue_entry *next , /* Next element, if any             */
-	*next_100; /* 100 elements ahead               */
+					*next_100; /* 100 elements ahead               */
 #ifdef XIAOSA
-	s32 parent_id; /* the parent test case id*/
-	s32 self_id; /* the self test case id*/
-	u8 *change_op; /* mark the change operate*/
-	s32 nm_child; /* count the child number*/
-	u64 fuzz_us; /*the time of function of fuzzone*/
-	u8 in_top_rate; /*to mark the testcase is in the top_rate*/
-	u8 has_in_trace_plot;   /*to mark if it has been save in plot file*/
-	u8 kill_signal; /*save the signal value if it has, 0 means no*/
+	u32 parent_id; /* the parent test case id*/
+	u32 self_id; /* the self test case id*/
+	u8*	change_op; /* mark the change operate*/
+	u32 nm_child; /* count the child number*/
+	u32 nm_crash_child; /* count the crash child number*/
+	u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
+	u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
+	u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
+	u8 	kill_signal; /*save the signal value if it has, 0 means no*/
 #endif
 
 };
@@ -349,6 +357,8 @@ enum
 	/* 05 */FAULT_NOBITS     //no new instrumentation output
 };
 
+
+
 /* Get unix time in milliseconds */
 
 static u64 get_cur_time(void)
@@ -357,10 +367,13 @@ static u64 get_cur_time(void)
 	struct timeval tv;
 	struct timezone tz;
 
-	gettimeofday(&tv,&tz);
+	gettimeofday(&tv,&tz);\
 
-	return (tv.tv_sec * 1000ULL) + (tv.tv_usec / 1000);
-
+#ifndef XIAOSA
+	return (tv.tv_sec * 1000ULL) + (tv.tv_usec / 1000)
+#else
+	return (tv.tv_sec * 1000ULL) + (tv.tv_usec / 1000)- (main_start_time/1000);
+#endif
 }
 
 /* Get unix time in microseconds */ //微秒
@@ -372,8 +385,11 @@ static u64 get_cur_time_us(void)
 
 	gettimeofday(&tv,&tz); //系统api,获取时间
 
-	return (tv.tv_sec * 1000000ULL) + tv.tv_usec;
-
+#ifndef XIAOSA
+	return (tv.tv_sec * 1000000ULL) + tv.tv_usec
+#else
+	return (tv.tv_sec * 1000000ULL) + tv.tv_usec- (main_start_time/1000);
+#endif
 }
 
 /* Generate a random number (from 0 to limit - 1). This may
@@ -568,7 +584,7 @@ static u8* DMS(u64 val)
 
 /* Describe time delta. Returns one static buffer, 34 chars of less. */
 
-static u8* DTD(u64 cur_ms, u64 event_ms)
+static u8* DTD(u64 cur_ms, u64 event_ms) //第一个参数是结束时间(毫秒),第二个参数是开始时间(毫秒)
 {
 
 	static u8 tmp [ 64 ];
@@ -683,8 +699,8 @@ static void mark_as_redundant(struct queue_entry* q, u8 state)
 		tmpy = alloc_printf(
 				"%-54s is not favorated, and its bitmapsize is %-6u \n",
 				tmpy + 1,q->bitmap_size);
-		ylen = snprintf(NULL,0,tmpy);
-		ck_write(fdy,tmpy,ylen,NULL);
+		ylen = snprintf(NULL,0, "%s",tmpy);
+		ck_write(fdy,tmpy,ylen,"redundant_edges");
 		ck_free(tmpy);
 		close(fdy);
 
@@ -707,8 +723,8 @@ static void mark_as_redundant(struct queue_entry* q, u8 state)
 						"%s favor again, and its bit_map size is %u\n",
 						q->fname,q->bitmap_size);
 
-		ylen = snprintf(NULL,0,tmpy);
-		ck_write(fdy,tmpy,ylen,NULL);
+		ylen = snprintf(NULL,0,"%s",tmpy);
+		ck_write(fdy,tmpy,ylen,"redundant_resume");
 		ck_free(tmpy);
 		close(fdy);
 #endif
@@ -774,6 +790,10 @@ static void destroy_queue(void)
 		n = q->next;
 		ck_free(q->fname);
 		ck_free(q->trace_mini);
+#ifdef XIAOSA
+		ck_free(q->change_op);
+		ck_free(q->fuzz_one_time);
+#endif
 		ck_free(q);
 		q = n;
 
@@ -1255,7 +1275,9 @@ static void update_bitmap_score(struct queue_entry* q)
 { //判断是否将测试用例添加到最优测试用例集合中
 //这个函数记录的q->trace_mini中已经删除了滚筒策略的相关信息
 	u32 i;
+	//yy
 	u64 fav_factor = q->exec_us * q->len;
+	//u64 fav_factor =  q->len;
 
 	/* For every byte set in trace_bits[], see if there is a previous winner,
 	 and how it compares to us. */
@@ -1269,8 +1291,8 @@ static void update_bitmap_score(struct queue_entry* q)
 
 				/* Faster-executing or smaller test cases are favored. */
 				//这里没有考虑滚筒
-				if (fav_factor
-						> top_rated [ i ]->exec_us * top_rated [ i ]->len)
+				if (fav_factor > top_rated [ i ]->exec_us * top_rated [ i ]->len)
+					//if (fav_factor > top_rated [ i ]->len)
 					continue; //运行时间*测试用例长度
 
 				/* Looks like we're going to win. Decrease ref count for the
@@ -2884,7 +2906,7 @@ static void init_forkserver(char** argv)
 
 	setitimer(ITIMER_REAL,&it,NULL);
 
-	rlen = read(fsrv_st_fd,&status,4);  //从fsrv_st_fd管道读取4个字节的内容
+	rlen = read(fsrv_st_fd,&status,4);  //从fsrv_st_fd管道读取4个字节的内容, 这里没有成功, 是为什么
 
 	it.it_value.tv_sec = 0;
 	it.it_value.tv_usec = 0;
@@ -3254,30 +3276,6 @@ static u8 run_target(char** argv)
 
 	prev_timed_out = child_timed_out;
 
-#ifdef XIAOSA
-	int i=0;
-	u8 * tmpy="";
-	int fdy;
-	tmpy = alloc_printf("%s/executed_num",out_dir);
-	remove(tmpy);
-	fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND ,0600);
-	if (fdy < 0)
-			PFATAL("Unable to create '%s'",tmpy);
-	ck_free(tmpy);
-	for (i = 0; i < MAP_SIZE; i++)
-	{
-		if (virgin_counts [ i ] != 0)
-		{
-
-			tmpy = alloc_printf("NO.%d is executed %-20d times;\n",i,virgin_counts [ i ]);
-			ck_write(fdy,tmpy,strlen(tmpy),NULL);
-			ck_free(tmpy);
-		}
-
-	}
-	close(fdy);
-
-#endif
 
 
 	/* Report outcome to caller. */
@@ -3462,7 +3460,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 			{
 
 				var_detected = 1; //表示同一个测试用例,不同次测试,路径不一致,即有随机路径
-				stage_max = CAL_CYCLES_LONG;
+				stage_max = CAL_CYCLES_LONG; //CAL_CYCLES_LONGshi 40
 
 			}
 			else
@@ -3482,7 +3480,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
 	q->exec_us = (stop_us - start_us) / stage_max;
 	q->bitmap_size = count_bytes(trace_bits); //统计有多少个元组关系
-	q->handicap = handicap;
+	q->handicap = handicap; //表示是第几次大循环中生成的
 	q->cal_failed = 0;
 
 	total_bitmap_size += q->bitmap_size; // 总的元组关系,有重复
@@ -4003,7 +4001,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 	u8 *fn = "";
 
 #ifdef XIAOSA
-	u8 *tmpy = "";
+	u8* tmpy = "";
 	s32 fdy;
 
 	//for cycle
@@ -4011,7 +4009,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 	u32 j = 0;
 
 	//for the len of the string
-	u16 ylen;
+	s32 ylen;
 #endif
 
 	u8 hnb;
@@ -4059,6 +4057,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 		ck_write(fd,mem,len,fn); //在queue目录下保存新的测试用例,这里并不会保存crash和hang
 		close(fd);
 
+//#if 0
 #ifdef XIAOSA
 		//保存新的测试用例的基本块地址跳跃信息
 		//这一部分可以写到minimize_bits函数里
@@ -4075,7 +4074,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 						"id:%06u %s is in the top_rate, block number is:%-6u,its parent is id:%06d\n",
 						queued_paths - 1,queue_top->in_top_rate ? "   " : "not",
 						queue_top->bitmap_size,current_entry);
-		ylen = snprintf(NULL,0,tmpy);
+		ylen = snprintf(NULL,0,"%s",tmpy);
 		write(fdy,tmpy,ylen);
 		ck_free(tmpy);
 		close(fdy);
@@ -4099,7 +4098,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 					/*if ((j & 15) == 0 && (j != 0))
 						write(fd,"\n",1);*/
 					tmpy = alloc_printf("%-6u\n",i);
-					ylen = snprintf(NULL,0,tmpy);
+					ylen = snprintf(NULL,0,"%s",tmpy);
 					write(fdy,tmpy,ylen);	//保存新的测试用例
 					ck_free(tmpy);
 					j++;
@@ -4112,7 +4111,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 
 #endif
 
-//#if 0
+
 #ifdef XIAOSA
 		//添加配置信息
 		queue_cur->nm_child++; // child number add 1
@@ -4129,8 +4128,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 		ck_free(tmpy);
 
 		//fn_xs = alloc_printf("	%d->%d[label=\"%s\"];\n",queue_top->parent_id,queue_top->self_id, queue_top->change_op);
-		tmpy = alloc_printf("	%d->%d;\n",queue_cur->self_id,queue_top->self_id);
-		ck_write(fdy,tmpy,strlen(tmpy),NULL);
+		tmpy = alloc_printf("	%u->%u;\n",queue_cur->self_id,queue_top->self_id);
+		ck_write(fdy,tmpy,strlen(tmpy),"test_add.plot");
 		ck_free(tmpy);
 
 		close(fdy);
@@ -4241,15 +4240,15 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 
 			// add the crash node
 			tmpy = alloc_printf(
-					"	crash%d[style = filled,color=burlywood2];\n",
+					"	crash%llu[style = filled,color=burlywood2];\n",
 					unique_crashes-1);
-			ck_write(fdy,tmpy,strlen(tmpy),NULL);
+			ck_write(fdy,tmpy,strlen(tmpy),"test_add.plot");
 			ck_free(tmpy);
 
 			//add the edge  o the crash testcase
-			tmpy = alloc_printf("	%d->crash%d[color=red];\n",
+			tmpy = alloc_printf("	%u->crash%llu[color=red];\n",
 					queue_cur->self_id,unique_crashes-1);
-			ck_write(fdy,tmpy,strlen(tmpy),NULL);
+			ck_write(fdy,tmpy,strlen(tmpy),"test_add.plot");
 			ck_free(tmpy);
 
 			close(fdy);
@@ -4264,7 +4263,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 
 #if 1
 			//每个crash测试用例的执行轨迹信息保存到一个单独文件
-			tmpy = alloc_printf("%s/crash_trace_mini/%u",out_dir,
+			queue_cur->nm_crash_child++;
+			tmpy = alloc_printf("%s/crash_trace_mini/crash:%llu",out_dir,
 					unique_crashes - 1);
 			fdy = open(tmpy,O_WRONLY | O_CREAT | O_EXCL,0600);
 			if (fdy < 0)
@@ -4280,7 +4280,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 				{
 					//save the relation of the tuple
 					tmpy = alloc_printf("%-6u\n",i);
-					ylen = snprintf(NULL,0,tmpy);
+					ylen = snprintf(NULL,0,"%s",tmpy);
 					write(fdy,tmpy,ylen);	//保存新的测试用例
 					ck_free(tmpy);
 				}
@@ -4289,11 +4289,11 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 #endif
 			close(fdy);
 
-#if 1
+#if 0
 			//save the execution number of the tuple that in crash testcase
 
 			u8 * tmpy = "";
-			tmpy = alloc_printf("%s/crash_trace_mini/%u_executed_number",out_dir,
+			tmpy = alloc_printf("%s/crash_trace_mini/%llu_executed_number",out_dir,
 								unique_crashes - 1);
 			remove(tmpy);
 			fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND,0600);
@@ -4306,9 +4306,9 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 				if (trace_bits [ i ]== 128)
 				{
 
-					tmpy = alloc_printf("NO.%d is executed %-20d times;\n",i,
+					tmpy = alloc_printf("NO.%d is executed %-20u times;\n",i,
 							virgin_counts [ i ]);
-					ck_write(fdy,tmpy,strlen(tmpy),NULL);
+					ck_write(fdy,tmpy,strlen(tmpy),"each crash executed number");
 					ck_free(tmpy);
 				}
 
@@ -5073,15 +5073,17 @@ static void show_stats(void)
 
 	SAYF(TERM_HOME);
 
+//yyy
+#ifndef XIAOSA
 	if (term_too_small)
 	{
 
 		SAYF(
 				cBRI "Your terminal is too small to display the UI.\n" "Please resize terminal window to at least 80x25.\n" cNOR);
-		//yyy
-		//return;
+		return;
 
 	}
+#endif
 
 	/* Let's start by drawing a centered banner. */
 
@@ -5531,7 +5533,6 @@ static void show_init_stats(void)
 
 	OKF(
 			"Here are some useful stats:\n\n"
-
 			cGRA "    Test case count : " cNOR "%u favored, %u variable, %u total\n" cGRA "       Bitmap range : " cNOR "%u to %u bits (average: %0.02f bits)\n" cGRA "        Exec timing : " cNOR "%s to %s us (average: %s us)\n",
 			queued_favored,queued_variable,queued_paths,min_bits,max_bits,
 			((double )total_bitmap_size)
@@ -5621,7 +5622,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf)
 
 	len_p2 = next_p2(q->len); //和2的幂次方对应,向上取
 	//这个是经验性的操作,步长
-	remove_len = MAX(len_p2 / TRIM_START_STEPS,TRIM_MIN_BYTES); //TRIM_START_STEPS is 16,  TRIM_MIN_BYTES is 4
+	remove_len = MAX(len_p2 / TRIM_START_STEPS,TRIM_MIN_BYTES); //TRIM_START_STEPS is ,  TRIM_MIN_BYTES is
 
 	/* Continue until the number of steps gets too high or the stepover
 	 gets too small. */
@@ -5637,7 +5638,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf)
 		stage_max = q->len / remove_len; //循环次数
 
 		while (remove_pos < q->len)
-		{ //每次q->len长度减少remove_pos(一般为4),q指向queue/id:000000,orig:a
+		{ //每次q->len长度减少remove_pos,q指向queue/id:000000,orig:a
 
 			u32 trim_avail = MIN(remove_len,q->len - remove_pos); //准备缩减的字节数量
 			u32 cksum;
@@ -5660,8 +5661,8 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf)
 			 best-effort pass, so it's not a big deal if we end up with false
 			 negatives every now and then. */
 
-			if (cksum == q->exec_cksum)
-			{ //说明执行轨迹没有变换
+			if (cksum == q->exec_cksum)//修正后的执行轨迹hash和初始的执行轨迹hash,是完全准确的
+			{ //说明执行轨迹没有变换,
 
 				u32 move_tail = q->len - remove_pos - trim_avail;
 
@@ -5702,7 +5703,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf)
 	 version of the test case. */
 
 	if (needs_write)
-	{
+	{	//将trim后的信息重新覆盖写入
 
 		s32 fd;
 
@@ -5718,7 +5719,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf)
 
 		memcpy(trace_bits,clean_trace,MAP_SIZE);
 		update_bitmap_score(q); //打分,更改top_rate数组,因为top_rate数组指向的内容都是queue目录上的
-
+		//这里搞这个函数是不是,是因为长度会变化,所以判断标准也会变化.
 	}
 
 	abort_trimming:
@@ -5841,7 +5842,7 @@ static u32 calculate_score(struct queue_entry* q)
 	/* Adjust score based on execution speed of this path, compared to the
 	 global average. Multiplier ranges from 0.1x to 3x. Fast inputs are
 	 less expensive to fuzz, so we're giving them more air time. */
-
+	//从执行时间的角度考虑问题
 	if (q->exec_us * 0.1 > avg_exec_us)
 		perf_score = 10;
 	else if (q->exec_us * 0.25 > avg_exec_us)
@@ -5859,7 +5860,7 @@ static u32 calculate_score(struct queue_entry* q)
 
 	/* Adjust score based on bitmap size. The working theory is that better
 	 coverage translates to better targets. Multiplier from 0.25x to 3x. */
-
+	//从基本块数量的角度考虑问题
 	if (q->bitmap_size * 0.3 > avg_bitmap_size)
 		perf_score *= 3;
 	else if (q->bitmap_size * 0.5 > avg_bitmap_size)
@@ -5876,13 +5877,11 @@ static u32 calculate_score(struct queue_entry* q)
 	/* Adjust score based on handicap. Handicap is proportional to how late
 	 in the game we learned about this path. Latecomers are allowed to run
 	 for a bit longer until they catch up with the rest. */
-
+	//handicap是大循环的次数,越后面产生的多跑一会,表示这个测试用例难跑出来.
 	if (q->handicap >= 4)
 	{
-
 		perf_score *= 4;
-		q->handicap -= 4;
-
+		q->handicap -= 4; //每次乘以4之后减去4.
 	}
 	else if (q->handicap)
 	{
@@ -6157,8 +6156,7 @@ static u8 fuzz_one(char** argv)
 	s32 len , fd , temp_len , i , j;
 	u8 *in_buf , *out_buf , *orig_in , *ex_tmp , *eff_map = 0;
 	u64 havoc_queued , orig_hit_cnt , new_hit_cnt;
-	u32 splice_cycle = 0 , perf_score = 100 , orig_perf , prev_cksum , eff_cnt =
-			1;
+	u32 splice_cycle = 0 , perf_score = 100 , orig_perf , prev_cksum , eff_cnt =1;
 
 	u8 ret_val = 1;
 
@@ -6246,8 +6244,8 @@ static u8 fuzz_one(char** argv)
 			PFATAL("Unable to create '%s'",tmpy);
 		ck_free(tmpy);
 		// current test case is executed
-		tmpy = alloc_printf("	%d[shape=record];\n",queue_cur->self_id); //每次运行的测试用例都记录,但是会被多次记录
-		ck_write(fdy,tmpy,strlen(tmpy),NULL);
+		tmpy = alloc_printf("	%u[shape=record];\n",queue_cur->self_id); //每次运行的测试用例都记录,但是会被多次记录
+		ck_write(fdy,tmpy,strlen(tmpy),"test_add.plot");
 		ck_free(tmpy);
 		close(fdy);
 		queue_cur->has_in_trace_plot = 1; //表示已经记录到trace_plot里了
@@ -6296,7 +6294,7 @@ static u8 fuzz_one(char** argv)
 	/************
 	 * TRIMMING *
 	 ************/
-
+#if 1
 	if (!dumb_mode && !queue_cur->trim_done)
 	{ //插桩模式,且测试用例没有trim过
 
@@ -6321,7 +6319,7 @@ static u8 fuzz_one(char** argv)
 	}
 
 	memcpy(out_buf,in_buf,len); //in_buf指向的值赋值给out_buf指向的值 即将测试用例内容赋值给out_buf
-
+#endif
 	/*********************
 	 * PERFORMANCE SCORE *
 	 *********************/
@@ -6333,7 +6331,7 @@ static u8 fuzz_one(char** argv)
 	 testing in earlier, resumed runs (passed_det). */
 
 	if (skip_deterministic || queue_cur->was_fuzzed || queue_cur->passed_det)
-		goto havoc_stage;
+		goto havoc_stage; //三种情况下,跳过确定性阶段的变异fuzz
 
 	/*********************************************
 	 * SIMPLE BITFLIP (+dictionary construction) *
@@ -7414,7 +7412,7 @@ static u8 fuzz_one(char** argv)
 	 * RANDOM HAVOC *
 	 ****************/
 
-	havoc_stage:
+havoc_stage:
 
 	stage_cur_byte = -1; //不知道偏移量了
 
@@ -7427,7 +7425,7 @@ static u8 fuzz_one(char** argv)
 		stage_name = "havoc";
 		stage_short = "havoc";
 		stage_max = HAVOC_CYCLES * perf_score / havoc_div / 100;
-
+					//即对HAVOC_CYCLES乘以一个系数,HAVOC_CYCLES是一个基本数
 	}
 	else
 	{
@@ -7443,7 +7441,7 @@ static u8 fuzz_one(char** argv)
 
 	}
 
-	if (stage_max < HAVOC_MIN)
+	if (stage_max < HAVOC_MIN) //为了保证最小次数
 		stage_max = HAVOC_MIN;
 
 	temp_len = len;
@@ -7454,11 +7452,11 @@ static u8 fuzz_one(char** argv)
 
 	/* We essentially just do several thousand runs (depending on perf_score)
 	 where we take the input file and make random stacked tweaks. */
-
+	//stage_max 最小为HAVOC_MIN次,这里为10次
 	for (stage_cur = 0; stage_cur < stage_max; stage_cur++)
 	{
 
-		u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2)); //随机设置操作次数
+		u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2)); //随机设置操作次数,1到256之间随机
 
 		stage_cur_val = use_stacking; //记录采取的操作循环次数
 
@@ -7882,7 +7880,7 @@ static u8 fuzz_one(char** argv)
 		}
 
 		if (common_fuzz_stuff(argv,out_buf,temp_len))
-			goto abandon_entry;
+			goto abandon_entry; //如果结束或者被挂起,就不再跑了
 
 		/* out_buf might have been mangled a bit, so let's restore it to its
 		 original size and shape. */
@@ -7894,7 +7892,7 @@ static u8 fuzz_one(char** argv)
 
 		/* If we're finding new stuff, let's run for a bit longer, limits
 		 permitting. */
-
+		//如果发现了新的路径,就多跑一会
 		if (queued_paths != havoc_queued)
 		{
 
@@ -8354,8 +8352,13 @@ static void check_binary(u8* fname)
 #ifndef __APPLE__
 
 	if (f_data [ 0 ] != 0x7f || memcmp(f_data + 1,"ELF",3))
-		FATAL("Program '%s' is not an ELF binary",target_path);
 
+		#ifdef CGC
+			if (f_data[0] != 0x7f || memcmp(f_data + 1, "CGC", 3)) //这里添加了cgc 判断
+				FATAL("Program '%s' is not an ELF or CGC binary", target_path);
+		#else
+			FATAL("Program '%s' is not an ELF binary",target_path);
+		#endif
 #else
 
 	if (f_data[0] != 0xCF || f_data[1] != 0xFA || f_data[2] != 0xED)
@@ -9220,11 +9223,160 @@ static void save_cmdline(u32 argc, char** argv)
 
 }
 
+
+
+#ifdef XIAOSA
+//Functions by xiaosatianyu,just before the main function
+
+//save the times about the tuple execution number
+static void y_save_tuple_execution_num()
+{
+	u32 i = 0;
+	u8 * tmpy = "";
+	int fdy;
+	tmpy = alloc_printf("%s/executed_num",out_dir);
+	remove(tmpy);
+	fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND,0600);
+	if (fdy < 0)
+		PFATAL("Unable to create '%s'",tmpy);
+	ck_free(tmpy);
+	for (i = 0; i < MAP_SIZE; i++)
+	{
+		if (virgin_counts [ i ] != 0)
+		{
+
+			tmpy = alloc_printf("NO.%-6u is executed %-20u times;\n",i,
+					virgin_counts [ i ]);
+			ck_write(fdy,tmpy,strlen(tmpy),"executed_num file");
+			ck_free(tmpy);
+		}
+
+	}
+	close(fdy);
+}
+
+//save the informaiton about the big cycle
+static void y_save_information_big_cycle()
+{
+	u8* tmpy="";
+	int fdy;
+	//记录每一次大循环的起始和结束时间,这个大循环增加的测试用例数量
+
+	//open then target file
+	tmpy = alloc_printf("%s/big_cycle_information",out_dir);
+	fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND,0600); //需要追加的模式
+	if (fdy < 0)
+		PFATAL("Unable to open '%s'","out_dir/big_cycle_information");
+	ck_free(tmpy);
+
+	if (queued_paths == queued_at_start)
+	{
+		//if the first
+		big_cycle_start_time = get_cur_time(); //first big cycle
+
+		//save the initial information about the queue and crash catalog
+		last_big_cycle_case_num = queued_at_start; //intial number of the testcase
+		last_big_cycle_crash_num = 0;	//intial number of the crash
+		tmpy = alloc_printf("the initial testcase number is %d.\n"
+				"the initial crash number is %d\n\n",queued_at_start,
+				last_big_cycle_crash_num);
+		ck_write(fdy,tmpy,strlen(tmpy),"big_cycle_information");
+		ck_free(tmpy);
+		close(fdy);
+	}
+	else
+	{
+		//calculate the time
+		big_cycle_stop_time = get_cur_time(); // the stop time of the big cycle
+
+		time_of_big_cycle = (big_cycle_stop_time - big_cycle_start_time) / 1000; //second level
+
+		//save the added number of the testcase in the queue and crash catalog
+		//the queue catalog
+		add_case_num_last_big_cycle = queued_paths - last_big_cycle_case_num;
+		last_big_cycle_case_num = queued_paths;
+
+		//the crash catalog
+		add_crash_num_last_big_cycle = unique_crashes
+				- last_big_cycle_crash_num;
+		last_big_cycle_crash_num = unique_crashes;
+
+		//save to the file
+		tmpy = alloc_printf(
+				"the add number of the testcase in the NO.%llu cycle is %u, "
+				"the total number of the testcase is %u\n"
+				"the add number of the crash in the NO.%llu cycle is %u, "
+				"the total number of the crash is %llu\n"
+				"the consume time is %-30s \n\n",
+				queue_cycle ,
+				add_case_num_last_big_cycle,queued_paths,
+				queue_cycle ,
+				add_crash_num_last_big_cycle,unique_crashes,
+				DTD(big_cycle_stop_time,big_cycle_start_time));
+		ck_write(fdy,tmpy,strlen(tmpy),"big_cycle_information");
+		ck_free(tmpy);
+		close(fdy);
+
+		big_cycle_start_time = big_cycle_stop_time;	//reset the start time of the next big cycle
+	}
+
+}
+
+//save the informaition when the the fuzzone function end
+//save the time and the child number
+static void y_save_fuzzone_end_each_cycle()
+{
+	u8* tmpy = "";
+	int fdy;
+	//记录每一次大循环的起始和结束时间,这个大循环增加的测试用例数量
+
+	//open then target file
+	//tmpy = alloc_printf("%s/fuzz_one_end_in_cycle%llu",out_dir,queue_cycle);
+	tmpy = alloc_printf("%s/fuzz_one_end",out_dir);
+	fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND,0600); //需要追加的模式
+	if (fdy < 0)
+		PFATAL("Unable to open '%s'","out_dir/big_cycle_information");
+	ck_free(tmpy);
+
+	tmpy =alloc_printf(
+		  "%u cycle %llu fuzzone %s,child:%u,crash:%u,bit_size:%u,%s in_top_rate,len:%u\n",
+		  queue_cur->self_id,queue_cycle,queue_cur->fuzz_one_time,queue_cur->nm_child,queue_cur->nm_crash_child,
+		  queue_cur->bitmap_size, queue_cur->in_top_rate?"":"not",queue_cur->len
+		 );
+	ck_write(fdy,tmpy,strlen(tmpy),"fuzz_one_end");
+	ck_free(tmpy);
+	close(fdy);
+
+}
+
+
+
+/* Get unix time in microseconds  at main function begin*/ //微秒
+static u64 y_get_cur_time_us_at_start(void)
+{
+
+	struct timeval tv;
+	struct timezone tz;
+
+	gettimeofday(&tv,&tz); //系统api,获取时间
+
+	return (tv.tv_sec * 1000000ULL) + tv.tv_usec; //返回的是微秒
+
+}
+
+
+#endif //end  #ifdef XIAOSA
+
+
+
 /* Main entry point */
 
 int main(int argc, char** argv)
 {
-	//system("/home/xiaosatianyu/Desktop/afl-yyy/test_include.sh 1 2");
+#ifdef XIAOSA
+	//record the start time at main function
+	main_start_time=y_get_cur_time_us_at_start();
+#endif
 
 	s32 opt;
 	u64 prev_queued = 0;
@@ -9233,7 +9385,6 @@ int main(int argc, char** argv)
 	u8 mem_limit_given = 0;
 #ifdef XIAOSA
 	u64 fuzz_start_us , fuzz_stop_us; // to remark the time of function fuzzone
-	u8 tmp [ 256 ]; // for calculate the fuzzone time
 	s32 fdy; //file IO
 	u8 *tmpy = ""; ///yyy temp alloc
 #endif
@@ -9768,14 +9919,14 @@ int main(int argc, char** argv)
 
 	check_binary(argv [ optind ]);
 
-	start_time = get_cur_time();
+	start_time = get_cur_time();//运行开始时间
 
 	if (qemu_mode)
 		//argv[0]指向afl-fuzz
 		//argv + optind指向目标程序
 		//最后返回值是`afl-qemu-trace  --  aflout2 .cur_intput`
 		//argc-optind表示use_argv中参数的个数
-		use_argv = get_qemu_argv(argv [ 0 ],argv + optind,argc - optind); //获得启动qemu的参数
+		use_argv = get_qemu_argv(argv [ 0 ],argv + optind,argc - optind); //获得启动qemu的参数, 只有目标程序
 	else
 		use_argv = argv + optind; //执行的程序以及参数
 
@@ -9796,7 +9947,7 @@ int main(int argc, char** argv)
 			"	graph[fontname = \"Helvetica-Oblique\",\n"
 			"		size = \"100000,100000\",\n"
 			"		ratio=1.2 ];\n"); //提前写入头信息
-	ck_write(fdy,tmpy,strlen(tmpy),NULL);
+	ck_write(fdy,tmpy,strlen(tmpy),"test_add.plot");
 	ck_free(tmpy);
 	close(fdy);
 	//--------------------
@@ -9813,6 +9964,11 @@ int main(int argc, char** argv)
 	//保存每次大循环信息的文件
 	tmpy = alloc_printf("%s/big_cycle_information",out_dir);
 	remove(tmpy); //冗余恢复的例子
+	ck_free(tmpy);
+
+	//remove the old file for the function of y_save_fuzzone_end_each_cycle
+	tmpy = alloc_printf("%s/fuzz_one_end",out_dir);
+	remove(tmpy);
 	ck_free(tmpy);
 
 #endif
@@ -9847,12 +10003,17 @@ int main(int argc, char** argv)
 	{ //死循环,一直跑
 
 		u8 skipped_fuzz;
-
+#ifdef XIAOSA
+		y_save_tuple_execution_num();
+#endif
 		cull_queue(); //每次都约简测试用例,约简的对象是最优化测试用例(最优化测试用例什么时候改变的?)
 
 		if (!queue_cur)
 		{ //每轮询完一次所有测试用例,就进入一次
 
+#ifdef XIAOSA
+			y_save_information_big_cycle(); //save the information in each big cycle
+#endif
 			queue_cycle++; //记录循环次数
 			current_entry = 0;
 			cur_skipped_paths = 0;
@@ -9883,7 +10044,6 @@ int main(int argc, char** argv)
 					cycles_wo_finds++;
 				else
 					use_splicing = 1;
-
 			}
 			else
 				cycles_wo_finds = 0;
@@ -9892,69 +10052,17 @@ int main(int argc, char** argv)
 
 			if (sync_id && queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
 				sync_fuzzers(use_argv);
-
-#ifdef XIAOSA
-			//记录每一次大循环的起始和结束时间,这个大循环增加的测试用例数量
-			//将上述信息保存到一个文件
-
-			//open then target file
-			tmpy = alloc_printf("%s/big_cycle_information",out_dir);
-			fdy = open(tmpy,O_WRONLY | O_CREAT | O_APPEND,0600); //需要追加的模式
-			if (fdy < 0)
-				PFATAL("Unable to open '%s'","out_dir/big_cycle_information");
-			ck_free(tmpy);
-
-			//save the added number of the testcase in the queue catalog
-			if (queued_paths == queued_at_start)
-			{
-				last_big_cycle_case_num = queued_at_start; //intial number of the testcase
-				last_big_cycle_crash_num=0;					//intial number of the crash
-				tmpy = alloc_printf("the initial testcase number is %d.\n"
-									"the initial crash number is %d\n\n",
-						queued_at_start,last_big_cycle_crash_num);
-				ck_write(fdy,tmpy,strlen(tmpy),NULL);
-				ck_free(tmpy);
-				close(fdy);
-			}
-
-			else
-			{
-				//the normal case
-				add_case_num_last_big_cycle = queued_paths - last_big_cycle_case_num;
-				last_big_cycle_case_num=queued_paths;
-
-				//the crash
-				add_crash_num_last_big_cycle = unique_crashes - last_big_cycle_crash_num;
-				last_big_cycle_crash_num=unique_crashes;
-
-				tmpy =
-						alloc_printf(
-								"the add number of testcase in the NO.%d cycle is %d, "
-								"the total number of the testcase is %d\n"
-								"the add number of the crash in the NO.%d cycle is %d, "
-								"the total number of the crash is %d\n\n",
-								queue_cycle - 1,add_case_num_last_big_cycle,queued_paths,
-								queue_cycle - 1,add_crash_num_last_big_cycle,unique_crashes);
-				ck_write(fdy,tmpy,strlen(tmpy),NULL);
-				ck_free(tmpy);
-				close(fdy);
-			}
-			//save the added number of the crash testcase in the crash catalog
-#endif
-
 		}
 		//qemu模式下 use_argv afl-qemu-trace -- afl-qemu-out .cur_input
 #ifdef XIAOSA
-		fuzz_start_us = fuzz_stop_us = 0;
-		fuzz_start_us = get_cur_time_us();
+		fuzz_start_us = get_cur_time();
 #endif
-
 		skipped_fuzz = fuzz_one(use_argv); //从此正式开始fuzz.运行一次后 跑的快的肯定是被约简过的
 
 #ifdef XIAOSA
-		fuzz_stop_us = get_cur_time_us();
-		alloc_printf(tmp,"%s(sec)\n ",(fuzz_stop_us - fuzz_start_us) / 100000);
-		queue_cur->fuzz_us = (fuzz_stop_us - fuzz_start_us) / 100000;
+		fuzz_stop_us = get_cur_time();
+		queue_cur->fuzz_one_time=alloc_printf( "%s",DTD(fuzz_stop_us,fuzz_start_us));
+		y_save_fuzzone_end_each_cycle();
 #endif
 
 		if (!stop_soon && sync_id && !skipped_fuzz)
@@ -10015,7 +10123,7 @@ int main(int argc, char** argv)
 	ck_free(tmpy);
 
 	tmpy = alloc_printf("}\n");
-	ck_write(fdy,tmpy,strlen(tmpy),NULL);
+	ck_write(fdy,tmpy,strlen(tmpy),"%s/test_add.plot");
 	ck_free(tmpy);
 
 	close(fdy);
@@ -10024,3 +10132,7 @@ int main(int argc, char** argv)
 	exit(0);
 
 }
+
+
+
+
