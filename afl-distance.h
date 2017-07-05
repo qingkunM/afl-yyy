@@ -49,13 +49,16 @@ struct queue_entry
 #ifdef XIAOSA
 	u32 parent_id; /* the parent test case id*/
 	u32 self_id; /* the self test case id*/
-	u8*	change_op; /* mark the change operate*/
+	u8* change_op; /* mark the change operate*/
 	u32 nm_child; /* count the child number*/
 	u32 nm_crash_child; /* count the crash child number*/
 	u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
-	u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
-	u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
-	u8 	kill_signal; /*save the signal value if it has, 0 means no*/
+	u8 in_top_rate; /*to mark the testcase is in the top_rate*/
+	u8 has_in_trace_plot; /*to mark if it has been save in plot file*/
+	u8 kill_signal; /*save the signal value if it has, 0 means no*/
+#endif
+
+#ifdef DISTANCE
 	u8* id; /*the short name of the testcase*/
 #endif
 };
