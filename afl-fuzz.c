@@ -26,11 +26,11 @@
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 
-#include "config.h"
-#include "types.h"
-#include "debug.h"
 #include "alloc-inl.h"
 #include "hash.h"
+
+//distance
+#include "afl-distance.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -60,10 +60,11 @@
 #include <sys/sendfile.h>
 
 #ifdef XIAOSA
-
 	#include <sys/ipc.h>
-
 #endif
+
+
+
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
@@ -218,6 +219,7 @@ static u64 total_bitmap_size , /* Total bit count for all bitmaps  */  //元组�
 static u32 cpu_core_count; /* CPU core count                   */
 
 static FILE* plot_file; /* Gnuplot output file              */
+       FILE* distance_file; /*the file to record the distance*/
 
 /* Globals for network support */
 
@@ -241,46 +243,46 @@ static u32 N_timeout_given = 0; /* use delay before network I/O     */
 static u32 N_exec_tmout = 0; /* network I/O delay in msec        */
 static struct timespec N_it; /* structure for nanosleep() call   */
 
-struct queue_entry
-{
-
-	u8* fname; /* File name for the test case      */
-	u32 len; /* Input length                     */
-
-	u8 	cal_failed , /* Calibration failed?              */
-		trim_done , /* Trimmed?                         */
-		was_fuzzed , /* Had any fuzzing done yet?        */
-		passed_det , /* Deterministic stages passed?     */
-		has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
-		var_behavior , /* Variable behavior?               */
-		favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
-		fs_redundant; /* Marked as redundant in the fs?   */
-
-	u32 bitmap_size , /* Number of bits set in bitmap     */ //表示有多少元组跳跃关系
-		exec_cksum; /* Checksum of the execution trace  */
-
-	u64 exec_us , /* Execution time (us)              */  //每一个测试的平均时间
-		handicap , /* Number of queue cycles behind    */
-		depth; /* Path depth                       */  //这个怎么定义的?
-
-	u8* trace_mini; /* Trace bytes, if kept  每一位对应trace_bit的一个字节 */
-	u32 tc_ref; /* Trace bytes ref count            */  //被top_rated引用的次数
-
-	struct queue_entry *next , /* Next element, if any             */
-					*next_100; /* 100 elements ahead               */
-#ifdef XIAOSA
-	u32 parent_id; /* the parent test case id*/
-	u32 self_id; /* the self test case id*/
-	u8*	change_op; /* mark the change operate*/
-	u32 nm_child; /* count the child number*/
-	u32 nm_crash_child; /* count the crash child number*/
-	u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
-	u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
-	u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
-	u8 	kill_signal; /*save the signal value if it has, 0 means no*/
-#endif
-
-};
+//struct queue_entry
+//{
+//
+//	u8* fname; /* File name for the test case      */
+//	u32 len; /* Input length                     */
+//
+//	u8 	cal_failed , /* Calibration failed?              */
+//		trim_done , /* Trimmed?                         */
+//		was_fuzzed , /* Had any fuzzing done yet?        */
+//		passed_det , /* Deterministic stages passed?     */
+//		has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
+//		var_behavior , /* Variable behavior?               */
+//		favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
+//		fs_redundant; /* Marked as redundant in the fs?   */
+//
+//	u32 bitmap_size , /* Number of bits set in bitmap     */ //表示有多少元组跳跃关系
+//		exec_cksum; /* Checksum of the execution trace  */
+//
+//	u64 exec_us , /* Execution time (us)              */  //每一个测试的平均时间
+//		handicap , /* Number of queue cycles behind    */
+//		depth; /* Path depth                       */  //这个怎么定义的?
+//
+//	u8* trace_mini; 					/* Trace bytes, if kept  每一位对应trace_bit的一个字节 */
+//	u32 tc_ref; /* Trace bytes ref count            */  //被top_rated引用的次数
+//
+//	struct queue_entry *next , /* Next element, if any             */
+//					*next_100; /* 100 elements ahead               */
+//#ifdef XIAOSA
+//	u32 parent_id; /* the parent test case id*/
+//	u32 self_id; /* the self test case id*/
+//	u8*	change_op; /* mark the change operate*/
+//	u32 nm_child; /* count the child number*/
+//	u32 nm_crash_child; /* count the crash child number*/
+//	u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
+//	u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
+//	u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
+//	u8 	kill_signal; /*save the signal value if it has, 0 means no*/
+//#endif
+//
+//};
 
 static struct queue_entry *queue , /* Fuzzing queue (linked list)      */
 *queue_cur , /* Current offset within the queue  */
@@ -358,9 +360,7 @@ enum
 };
 
 
-
 /* Get unix time in milliseconds */
-
 static u64 get_cur_time(void)
 { //毫秒
 
@@ -737,8 +737,27 @@ static void mark_as_redundant(struct queue_entry* q, u8 state)
 
 }
 
-/* Append new test case to the queue. */
+/* Compact trace bytes into a smaller bitmap. We effectively just drop the
+ count information here. This is called only sporadically(偶尔), for some
+ new paths. */
 
+static void minimize_bits(u8* dst, u8* src)
+{
+
+	u32 i = 0;
+
+	while (i < MAP_SIZE)
+	{ //65536次循环
+
+		if (*(src++))
+		{
+			dst [ i >> 3 ] |= 1 << (i & 7); //i&7就是0到7的循环  //这种计算方式贼快 7 is 0b111
+		}
+		i++;
+	}
+}
+
+/* Append new test case to the queue. */
 static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 {
 
@@ -748,16 +767,16 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 	q->len = len;
 	q->depth = cur_depth + 1;
 	q->passed_det = passed_det;
+	q->id=strrchr(fname, '/')+1;
+
 
 	if (q->depth > max_depth)
 		max_depth = q->depth;
 
 	if (queue_top)
 	{
-
 		queue_top->next = q;
-		queue_top = q;
-
+		queue_top = q; //每次都是添加到queue末尾
 	}
 	else
 		q_prev100 = queue = queue_top = q;
@@ -767,14 +786,19 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 
 	if (!(queued_paths % 100))
 	{
-
 		q_prev100->next_100 = q;
 		q_prev100 = q;
-
 	}
 
 	last_path_time = get_cur_time();
 
+	//need to generate trace_mini before adding to the queue
+	if (!q->trace_mini)
+	{
+		q->trace_mini = ck_alloc(MAP_SIZE >> 3); //分配一个8192个字节,每位对应trace_bit的一个字节
+		minimize_bits(q->trace_mini, trace_bits); //去除了滚筒关系 ,0表示没有元组关系,1表示有
+	}
+	cal_distance_with_queue(queue,q); //q应该是最新的一个,id是大的
 }
 
 /* Destroy the entire queue. */
@@ -793,6 +817,7 @@ static void destroy_queue(void)
 #ifdef XIAOSA
 		ck_free(q->change_op);
 		ck_free(q->fuzz_one_time);
+		ck_free(q->id);
 #endif
 		ck_free(q);
 		q = n;
@@ -1238,28 +1263,7 @@ static void remove_shm(void)
 
 }
 
-/* Compact trace bytes into a smaller bitmap. We effectively just drop the
- count information here. This is called only sporadically(偶尔), for some
- new paths. */
 
-static void minimize_bits(u8* dst, u8* src)
-{
-
-	u32 i = 0;
-
-	while (i < MAP_SIZE)
-	{ //65536次循环
-
-		if (*(src++))
-		{
-			dst [ i >> 3 ] |= 1 << (i & 7); //i&7就是0到7的循环  //这种计算方式贼快 7 is 0b111
-
-		}
-		i++;
-
-	}
-
-}
 
 /* When we bump into a new path, we call this to see if the path appears
  more "favorable" than any of the existing ones. The purpose of the
@@ -1314,9 +1318,9 @@ static void update_bitmap_score(struct queue_entry* q)
 			}
 
 			/* Insert ourselves as the new winner. */
-
 			top_rated [ i ] = q;
 			q->tc_ref++;
+
 #ifdef XIAOSA
 			q->in_top_rate = 1;
 #endif
@@ -1326,7 +1330,6 @@ static void update_bitmap_score(struct queue_entry* q)
 				q->trace_mini = ck_alloc(MAP_SIZE >> 3); //分配一个8192个字节,每位对应trace_bit的一个字节
 				minimize_bits(q->trace_mini,trace_bits); //去除了滚筒关系 ,0表示没有元组关系,1表示有
 			}
-
 			score_changed = 1; //表示有新的测试用例增加到了top_rate数组中.
 
 		}
@@ -2827,7 +2830,7 @@ static void init_forkserver(char** argv)
 		/* Isolate the process and configure standard descriptors. If out_file is
 		 specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
 
-		setsid();
+		setsid(); //成为新的会话的领头进程
 
 		dup2(dev_null_fd,1);
 		dup2(dev_null_fd,2);
@@ -2841,8 +2844,8 @@ static void init_forkserver(char** argv)
 		else
 		{
 
-			dup2(out_fd,0);
-			close(out_fd);
+			dup2(out_fd,0); // 文件中的内容重定向到子程序的标准输入
+			close(out_fd); //为什么要关闭呢? 复制之后的关闭是什么情况
 
 		}
 
@@ -3479,7 +3482,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 	 This is used for fuzzing air time calculations in calculate_score(). */
 
 	q->exec_us = (stop_us - start_us) / stage_max;
-	q->bitmap_size = count_bytes(trace_bits); //统计有多少个元组关系
+	q->bitmap_size = count_bytes(trace_bits); //统计有多少个元组关系 非qemu模式下无法统计元组
 	q->handicap = handicap; //表示是第几次大循环中生成的
 	q->cal_failed = 0;
 
@@ -4934,6 +4937,11 @@ static void maybe_delete_out_dir(void)
 	if (unlink(fn) && errno != ENOENT)
 		goto dir_cleanup_failed;
 	ck_free(fn);
+
+	fn = alloc_printf("%s/distance_record",out_dir);
+		if (unlink(fn) && errno != ENOENT)
+			goto dir_cleanup_failed;
+		ck_free(fn);
 
 	OKF("Output dir cleanup successful.");
 
@@ -8103,7 +8111,7 @@ static void sync_fuzzers(char** argv)
 		}
 
 		/* Retrieve the ID of the last seen test case. */
-		//比如sync_dir/2/.synced/1   新见了一个目录,存放同步来的其他fuzzer下queue下的测试用例
+		//比如sync_dir/2/.synced/1   新见了一个目录,记录一下被同步的测试用例集合
 		qd_synced_path = alloc_printf("%s/.synced/%s",out_dir,sd_ent->d_name);
 
 		id_fd = open(qd_synced_path,O_RDWR | O_CREAT,0600);
@@ -8582,7 +8590,6 @@ static void setup_dirs_fds(void)
 	s32 fd;
 
 	ACTF("Setting up output directories...");
-
 	if (sync_id && mkdir(sync_dir,0700) && errno != EEXIST)
 		PFATAL("Unable to create '%s'",sync_dir);
 
@@ -8721,6 +8728,21 @@ static void setup_dirs_fds(void)
 	fprintf(plot_file,"# unix_time, cycles_done, cur_path, paths_total, "
 			"pending_total, pending_favs, map_size, unique_crashes, "
 			"unique_hangs, max_depth, execs_per_sec\n");
+
+	/* distance output file. */
+	tmp = alloc_printf("%s/distance_record", out_dir);
+	fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600); //修改成覆盖模式吧
+	if (fd < 0)
+		PFATAL("Unable to create '%s'", tmp);
+	ck_free(tmp);
+
+	distance_file = fdopen(fd, "w");
+	if (!distance_file)
+		PFATAL("fdopen() failed");
+
+	fprintf(distance_file, "# id, id, distance\n");
+
+
 	/* ignore errors */
 
 }
@@ -8734,7 +8756,7 @@ static void setup_stdio_file(void)
 
 	unlink(fn); /* Ignore errors */
 
-	out_fd = open(fn,O_RDWR | O_CREAT | O_EXCL,0600);
+	out_fd = open(fn,O_RDWR | O_CREAT | O_EXCL,0600); // stdin输入的情况下, 子进程将out_fd绑定到了标准输入
 
 	if (out_fd < 0)
 		PFATAL("Unable to create '%s'",fn);
@@ -9911,7 +9933,7 @@ int main(int argc, char** argv)
 
 	if (!timeout_given)
 		find_timeout(); //还不理解,大概是设置时间的
-	//即从文件中读取,将文件指向测试用例
+	//即从文件中读取,将文件指向测试用例  处理@@符号,如果没有,什么都没干
 	detect_file_args(argv + optind + 1); //查看最后是否有@@符号.将指向@@参数的指针修改成指向.cur_input
 
 	if (!out_file)
@@ -9928,7 +9950,7 @@ int main(int argc, char** argv)
 		//argc-optind表示use_argv中参数的个数
 		use_argv = get_qemu_argv(argv [ 0 ],argv + optind,argc - optind); //获得启动qemu的参数, 只有目标程序
 	else
-		use_argv = argv + optind; //执行的程序以及参数
+		use_argv = argv + optind; //非qemu模式下的执行的程序以及参数
 
 	//在配置信息结束后,正式运行前比较合适
 #ifdef XIAOSA
@@ -10106,6 +10128,7 @@ int main(int argc, char** argv)
 	}
 
 	fclose(plot_file);
+	fclose(distance_file); //关闭文件
 	destroy_queue();
 	destroy_extras();
 	ck_free(target_path);
