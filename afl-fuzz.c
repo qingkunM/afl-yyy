@@ -28,9 +28,15 @@
 
 #include "alloc-inl.h"
 #include "hash.h"
+#include "types.h"
+#include "config.h"
+#include "debug.h"
 
-//distance
-#include "afl-distance.h"
+
+#ifdef DISTANCE
+	//distance
+	#include "afl-distance.h"
+#endif
 
 #include <stdio.h>
 #include <unistd.h>
@@ -219,8 +225,10 @@ static u64 total_bitmap_size , /* Total bit count for all bitmaps  */  //元组�
 static u32 cpu_core_count; /* CPU core count                   */
 
 static FILE* plot_file; /* Gnuplot output file              */
-       FILE* distance_file; /*the file to record the distance*/
 
+#ifdef DISTANCE
+       FILE* distance_file; /*the file to record the distance*/
+#endif
 /* Globals for network support */
 
 static struct addrinfo *N_results = NULL , /* for results from getaddrinfo() */
@@ -243,46 +251,48 @@ static u32 N_timeout_given = 0; /* use delay before network I/O     */
 static u32 N_exec_tmout = 0; /* network I/O delay in msec        */
 static struct timespec N_it; /* structure for nanosleep() call   */
 
-//struct queue_entry
-//{
-//
-//	u8* fname; /* File name for the test case      */
-//	u32 len; /* Input length                     */
-//
-//	u8 	cal_failed , /* Calibration failed?              */
-//		trim_done , /* Trimmed?                         */
-//		was_fuzzed , /* Had any fuzzing done yet?        */
-//		passed_det , /* Deterministic stages passed?     */
-//		has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
-//		var_behavior , /* Variable behavior?               */
-//		favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
-//		fs_redundant; /* Marked as redundant in the fs?   */
-//
-//	u32 bitmap_size , /* Number of bits set in bitmap     */ //表示有多少元组跳跃关系
-//		exec_cksum; /* Checksum of the execution trace  */
-//
-//	u64 exec_us , /* Execution time (us)              */  //每一个测试的平均时间
-//		handicap , /* Number of queue cycles behind    */
-//		depth; /* Path depth                       */  //这个怎么定义的?
-//
-//	u8* trace_mini; 					/* Trace bytes, if kept  每一位对应trace_bit的一个字节 */
-//	u32 tc_ref; /* Trace bytes ref count            */  //被top_rated引用的次数
-//
-//	struct queue_entry *next , /* Next element, if any             */
-//					*next_100; /* 100 elements ahead               */
-//#ifdef XIAOSA
-//	u32 parent_id; /* the parent test case id*/
-//	u32 self_id; /* the self test case id*/
-//	u8*	change_op; /* mark the change operate*/
-//	u32 nm_child; /* count the child number*/
-//	u32 nm_crash_child; /* count the crash child number*/
-//	u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
-//	u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
-//	u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
-//	u8 	kill_signal; /*save the signal value if it has, 0 means no*/
-//#endif
-//
-//};
+#ifndef DISTANCE
+	struct queue_entry
+	{
+
+		u8* fname; /* File name for the test case      */
+		u32 len; /* Input length                     */
+
+		u8 	cal_failed , /* Calibration failed?              */
+			trim_done , /* Trimmed?                         */
+			was_fuzzed , /* Had any fuzzing done yet?        */
+			passed_det , /* Deterministic stages passed?     */
+			has_new_cov , /* Triggers new coverage?           */ //表示该测试用例变异后生成新的元组关系
+			var_behavior , /* Variable behavior?               */
+			favored , /* Currently favored?               */ //判断当前测试用例的受欢迎程度
+			fs_redundant; /* Marked as redundant in the fs?   */
+
+		u32 bitmap_size , /* Number of bits set in bitmap     */ //表示有多少元组跳跃关系
+			exec_cksum; /* Checksum of the execution trace  */
+
+		u64 exec_us , /* Execution time (us)              */  //每一个测试的平均时间
+			handicap , /* Number of queue cycles behind    */
+			depth; /* Path depth                       */  //这个怎么定义的?
+
+		u8* trace_mini; 					/* Trace bytes, if kept  每一位对应trace_bit的一个字节 */
+		u32 tc_ref; /* Trace bytes ref count            */  //被top_rated引用的次数
+
+		struct queue_entry *next , /* Next element, if any             */
+						*next_100; /* 100 elements ahead               */
+	#ifdef XIAOSA
+		u32 parent_id; /* the parent test case id*/
+		u32 self_id; /* the self test case id*/
+		u8*	change_op; /* mark the change operate*/
+		u32 nm_child; /* count the child number*/
+		u32 nm_crash_child; /* count the crash child number*/
+		u8* fuzz_one_time; /*the time of function of fuzzone, in the level of second*/
+		u8 	in_top_rate; /*to mark the testcase is in the top_rate*/
+		u8 	has_in_trace_plot;   /*to mark if it has been save in plot file*/
+		u8 	kill_signal; /*save the signal value if it has, 0 means no*/
+	#endif
+
+	};
+#endif
 
 static struct queue_entry *queue , /* Fuzzing queue (linked list)      */
 *queue_cur , /* Current offset within the queue  */
@@ -767,8 +777,9 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 	q->len = len;
 	q->depth = cur_depth + 1;
 	q->passed_det = passed_det;
+#ifdef DISTANCE
 	q->id=strrchr(fname, '/')+1;
-
+#endif
 
 	if (q->depth > max_depth)
 		max_depth = q->depth;
@@ -792,6 +803,7 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 
 	last_path_time = get_cur_time();
 
+#ifdef DISTANCE
 	//need to generate trace_mini before adding to the queue
 	if (!q->trace_mini)
 	{
@@ -799,6 +811,8 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det)
 		minimize_bits(q->trace_mini, trace_bits); //去除了滚筒关系 ,0表示没有元组关系,1表示有
 	}
 	cal_distance_with_queue(queue,q); //q应该是最新的一个,id是大的
+#endif
+
 }
 
 /* Destroy the entire queue. */
@@ -810,13 +824,14 @@ static void destroy_queue(void)
 
 	while (q)
 	{
-
 		n = q->next;
 		ck_free(q->fname);
 		ck_free(q->trace_mini);
 #ifdef XIAOSA
 		ck_free(q->change_op);
 		ck_free(q->fuzz_one_time);
+#endif
+#ifdef DISTANCE
 		ck_free(q->id);
 #endif
 		ck_free(q);
@@ -1454,7 +1469,7 @@ static void setup_shm(void)
 #ifdef XIAOSA
 //#if 0
 	//creat a shm to count the tuple execution number
-	u8* shm_str_y;
+	u8* shm_str_y; //加了一个块共享内存
 //	key_t key;
 //
 //	int fdy=0;
@@ -1479,7 +1494,7 @@ static void setup_shm(void)
 	shm_str_y = alloc_printf("%d",shm_id_virgin_counts);  //shm_id转化成字符串
 
 	if (!dumb_mode)
-		setenv(VIRGIN_COUNTS,shm_str_y,1); //在插桩模式下增加环境变量,通过环境变量告诉子进程qemu
+		setenv(VIRGIN_COUNTS,shm_str_y,1); //在插桩模式下增加环境变量,通过环境变量告诉子进程qemu 这个好像没有用到了
 
 	ck_free(shm_str_y);
 
@@ -4938,11 +4953,12 @@ static void maybe_delete_out_dir(void)
 		goto dir_cleanup_failed;
 	ck_free(fn);
 
+#ifdef DISTANCE
 	fn = alloc_printf("%s/distance_record",out_dir);
 		if (unlink(fn) && errno != ENOENT)
 			goto dir_cleanup_failed;
 		ck_free(fn);
-
+#endif
 	OKF("Output dir cleanup successful.");
 
 	/* Wow... is that all? If yes, celebrate! */
@@ -10128,7 +10144,9 @@ int main(int argc, char** argv)
 	}
 
 	fclose(plot_file);
+#ifdef DISTANCE
 	fclose(distance_file); //关闭文件
+#endif
 	destroy_queue();
 	destroy_extras();
 	ck_free(target_path);

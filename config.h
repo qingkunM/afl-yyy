@@ -19,6 +19,7 @@
 //yyy
 #define XIAOSA
 #define CGC
+#define DISTANCE
 //yyy
 #include "types.h"
 
