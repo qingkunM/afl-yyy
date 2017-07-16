@@ -4066,7 +4066,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault)
 
 		/* Try to calibrate inline; this also calls update_bitmap_score() when
 		 successful. */
-		res = calibrate_case(argv,queue_top,mem,queue_cycle - 1,0); //处理一下要新的测试用例
+		res = calibrate_case(argv,queue_top,mem,queue_cycle - 1,0); //处理一下要queue_top,保存一些有用的信息
 		if (res == FAULT_ERROR)
 			FATAL("Unable to execute target application");
 		fd = open(fn,O_WRONLY | O_CREAT | O_EXCL,0600);
@@ -8744,7 +8744,7 @@ static void setup_dirs_fds(void)
 	fprintf(plot_file,"# unix_time, cycles_done, cur_path, paths_total, "
 			"pending_total, pending_favs, map_size, unique_crashes, "
 			"unique_hangs, max_depth, execs_per_sec\n");
-
+#ifdef DISTANCE
 	/* distance output file. */
 	tmp = alloc_printf("%s/distance_record", out_dir);
 	fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600); //修改成覆盖模式吧
@@ -8757,7 +8757,7 @@ static void setup_dirs_fds(void)
 		PFATAL("fdopen() failed");
 
 	fprintf(distance_file, "# id, id, distance\n");
-
+#endif
 
 	/* ignore errors */
 

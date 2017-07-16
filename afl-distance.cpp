@@ -17,7 +17,7 @@ set<DP,comp> dis_list; // 记录所有的轨迹, 这个在c中没法调用 对�
 
 u32 cal_distance_with_queue(struct queue_entry *queue,struct queue_entry *q)//q1 是最新的
 {
-	struct queue_entry *queue_cur = queue;
+struct queue_entry *queue_cur = queue;
 	double distance=0;
 	while (queue_cur)
 	{
@@ -45,16 +45,35 @@ u32 cal_distance_with_queue(struct queue_entry *queue,struct queue_entry *q)//q1
 void update_distance_file()
 {
 	//n个测试用例,就有n(n-1)/2次比较
-	//输出文件定义
-	fseek(distance_file,0,0);
-	// 遍历 set
-	for (auto it = dis_list.begin(), end = dis_list.end(); it != end; it++)
-	{
-		DP tmp = *it; //按照distance下的顺序进行
-		fprintf(distance_file, "%s; %s; %0.f \n",
-				tmp.fname_min, tmp.fname_max, tmp.distance); /* ignore errors */
-		fflush(distance_file);
-	}
+		//输出文件定义
+		fseek(distance_file,0,0);
+		set<u8*>cached_list;
+		// 遍历 set
+		for (auto it = dis_list.begin(), end = dis_list.end(); it != end; it++)
+		{
+			DP tmp = *it; //按照distance下的顺序进行
+			if (!cached_list.empty())
+			{
+				if (cached_list.find(tmp.fname_min) != cached_list.end() and cached_list.find(tmp.fname_max) != cached_list.end())
+				{
+					continue;
+				}
+			}
+			if (tmp.fmax_bitmap_size>tmp.fmin_bitmap_size  ) //max 表示id大的,即是新的,但是新的也不一定好
+			{
+				fprintf(distance_file, "%s; %s; %0.f \n", "", tmp.fname_max, tmp.distance);
+			}
+			else
+			{
+				fprintf(distance_file, "%s; %s; %0.f \n", tmp.fname_min, "", tmp.distance);
+			}
+
+
+			fflush(distance_file);
+			cached_list.insert(tmp.fname_min);
+			cached_list.insert(tmp.fname_max);
+		}
+
 
 
 }

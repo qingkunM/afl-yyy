@@ -44,12 +44,12 @@ T1="$?"
 echo "$2" | grep -qE '^(/var)?/tmp/'
 T2="$?"
 
-if [ "$T1" = "0" -o "$T2" = "0" ]; then
+#if [ "$T1" = "0" -o "$T2" = "0" ]; then
 
-  echo "[-] Error: this script shouldn't be used with shared /tmp directories." 1>&2
-  exit 1
+  #echo "[-] Error: this script shouldn't be used with shared /tmp directories." 1>&2
+  #exit 1
 
-fi
+#fi
 
 if [ ! -f "$1/plot_data" ]; then
 
@@ -90,7 +90,7 @@ echo "[*] Generating plots..."
 cat <<_EOF_
 set terminal png truecolor enhanced size 1000,300 butt
 
-set output '$2/high_freq.png'
+set output '$2/high_freq.png' 
 
 set xdata time
 set timefmt '%s'

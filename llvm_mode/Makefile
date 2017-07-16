@@ -57,7 +57,7 @@ endif
 
 PROGS        = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o
 
-all: test_deps $(PROGS) test_build all_done
+all: test_deps $(PROGS)   #all_done test_build
 
 test_deps:
 	@echo "[*] Checking for working 'llvm-config'..."
@@ -71,7 +71,6 @@ test_deps:
 ../afl-clang-fast: afl-clang-fast.c | test_deps
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 	ln -sf afl-clang-fast ../afl-clang-fast++
-
 ../afl-llvm-pass.so: afl-llvm-pass.so.cc | test_deps
 	$(CXX) $(CLANG_CFL) -shared $< -o $@ $(CLANG_LFL)
 

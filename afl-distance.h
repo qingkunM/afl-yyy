@@ -66,8 +66,11 @@ struct queue_entry
 typedef struct distance_power {
     double distance;
     u8* fname_min;
+    u32 fmin_bitmap_size;
     u8* fname_max;
+    u32 fmax_bitmap_size;
 }DP; // the distance between two inputs
+//左边为旧,小号;右边是新,大号,这里的大小表示id
 
 
 
